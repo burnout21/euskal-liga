@@ -350,7 +350,60 @@ const BASE_TRAIN=0.07;    // ganancia base de entrenamiento por partido (baja: d
 const EXP_MAX_BONUS=9, EXP_K=0.045, EXP_GAIN=1, SEASON_EXP=38;
 function initExp(edad){return Math.max(0,Math.min(220,(edad-17)*18));} // veteranos ya rodados; juveniles ~0
 function expBonus(p){return Math.min(EXP_MAX_BONUS,(p.exp||0)*EXP_K);}
-function eff(p){return Math.min(99,p.rating+expBonus(p));} // fuerza real en el campo = habilidad + experiencia (tope 99)
+function eff(p){return Math.min(99,p.rating+expBonus(p));} // nivel interno con experiencia (tope 99)
+/* ---------- habilidades 1-20 (estilo Hattrick) ---------- */
+const SKILLS=[["por","POR","Portería"],["def","DEF","Defensa"],["jug","JUG","Jugadas"],["pas","PAS","Pases"],["ano","ANO","Anotación"],["tl","TL","Tiros libres"]];
+const SKILL_KEYS=SKILLS.map(s=>s[0]);
+const POSOFF={ // desvío de cada habilidad respecto al nivel del jugador según su puesto natural
+  GK:{por:0,def:-4,jug:-8,pas:-6,ano:-9,tl:-3},
+  DF:{por:-9,def:0,jug:-4,pas:-2,ano:-6,tl:-2},
+  MF:{por:-9,def:-3,jug:0,pas:0,ano:-3,tl:-1},
+  FW:{por:-9,def:-6,jug:-3,pas:-3,ano:0,tl:-1},
+};
+function mkBias(){const b={};SKILL_KEYS.forEach(k=>b[k]=Math.round(gauss()*1.3));b.tl=Math.round(gauss()*2.5);return b;} // sesgo individual; TL más disperso (especialistas)
+function clampS(v){return Math.max(1,Math.min(20,v));}
+function sk(p,k,useEff){const L=(useEff?eff(p):p.rating)/5;return clampS(Math.round(L+POSOFF[p.pos][k]+((p.bias&&p.bias[k])||0)));}
+function nivel(p){return clampS(Math.round(eff(p)/5));} // nivel compacto 1-20 (en campo, con experiencia)
+function expandForm(form){const n=FORMACIONES[form]||FORMACIONES["4-4-2"];const a=["GK"];for(let i=0;i<n.DF;i++)a.push("DF");for(let i=0;i<n.MF;i++)a.push("MF");for(let i=0;i<n.FW;i++)a.push("FW");return a;}
+function outPen(nat,slot){ // penalización por jugar fuera de su puesto natural
+  if(nat===slot)return 1;
+  if(nat==="GK"||slot==="GK")return 0.4;
+  const adj={DF:["MF"],MF:["DF","FW"],FW:["MF"]};
+  if((adj[nat]||[]).includes(slot))return 0.78;
+  return 0.6;
+}
+function slotSkill(p,slot,useEff){ // habilidad que aporta el jugador en ese hueco (1-20)
+  if(slot==="GK")return sk(p,"por",useEff);
+  if(slot==="DF")return sk(p,"def",useEff);
+  if(slot==="MF")return (sk(p,"jug",useEff)+sk(p,"pas",useEff))/2;
+  return sk(p,"ano",useEff);
+}
+/* ---------- especialidades (raras, dan un plus concreto) ---------- */
+const ESP={regate:"Regateador",posesion:"Especialista en tener el balón",centros:"Especialista en centros",aguerrido:"Defensa aguerrido",ladron:"Ladrón de balón",balon:"Especialista a balón parado",parapenaltis:"Portero parapenaltis"};
+const ESP_SHORT={regate:"Regates",posesion:"Posesión",centros:"Centros",aguerrido:"Aguerrido",ladron:"Robo",balon:"Balón parado",parapenaltis:"Parapenaltis"};
+function mkEsp(pos){
+  if(Math.random()>0.18)return null; // la mayoría no tiene especialidad
+  const pools={
+    GK:[["parapenaltis",0.8],["balon",1]],
+    DF:[["aguerrido",0.45],["ladron",0.8],["balon",1]],
+    MF:[["regate",0.3],["posesion",0.55],["ladron",0.75],["centros",0.9],["balon",1]],
+    FW:[["regate",0.45],["centros",0.7],["balon",0.9],["posesion",1]],
+  };
+  const r=Math.random();for(const [k,acc] of pools[pos])if(r<acc)return k;
+  return null;
+}
+function espSectorMult(p,slot){ // efectos que suben la fuerza de sector
+  const e=p.esp;if(!e)return 1;
+  const atk=(slot==="MF"||slot==="FW"), def=(slot==="DF"||slot==="GK");
+  if(e==="aguerrido"&&def)return 1.12;
+  if(e==="ladron"&&(def||slot==="MF"))return 1.10;
+  if(e==="regate"&&atk)return 1.12;
+  if(e==="posesion"&&slot==="MF")return 1.10;
+  if(e==="centros"&&atk)return 1.06;
+  return 1;
+}
+function teamHasEsp(team,e){return team.players.some(p=>p.esp===e);}
+function keeperHasEsp(team,e){const gk=team.players.filter(p=>p.pos==="GK").sort((a,b)=>eff(b)-eff(a))[0];return gk&&gk.esp===e;}
 
 /* ---------- estado ---------- */
 let S=null;
@@ -373,7 +426,7 @@ function mkPlayer(pos,rating,edad){
   else if(edad<=28)extra=rnd(2);
   else extra=0;
   const potencial=clampR(rating+extra);
-  return {id:pid(),name:newName(),pos,rating,potencial,edad,goles:0,exp:initExp(edad)};
+  return {id:pid(),name:newName(),pos,rating,potencial,edad,goles:0,exp:initExp(edad),bias:mkBias(),esp:mkEsp(pos)};
 }
 function ageFor(pos){
   // distribución realista: mayoría 22-30
@@ -404,7 +457,8 @@ function genProspect(baseStr,pos,crack){
   let rating,potencial;
   if(crack){ rating=clampR(baseStr-12+gauss()*3); potencial=clampR(94+rnd(6)); } // crack de 5 estrellas (techo 94-99)
   else{ rating=clampR(baseStr-16+gauss()*4); potencial=clampR(rating+14+rnd(26)); } // el techo es la apuesta
-  return {id:pid(),name:newName(),pos,rating,potencial,edad,goles:0,crack:!!crack,exp:initExp(edad),arrivedTemp:S?S.temporada:1};
+  const esp=mkEsp(pos)||(crack&&mkEsp(pos))||(crack&&mkEsp(pos))||null; // los cracks tienen más probabilidad de traer especialidad
+  return {id:pid(),name:newName(),pos,rating,potencial,edad,goles:0,crack:!!crack,exp:initExp(edad),arrivedTemp:S?S.temporada:1,bias:mkBias(),esp};
 }
 function regen(pos,baseStr){
   const edad=17+rnd(2);
@@ -456,19 +510,20 @@ function newGame(userTeamId){
 }
 
 /* ---------- simulación ---------- */
-function xiRating(team,xiIds){
+function xiRating(team,xiIds,form){
   const map={};team.players.forEach(p=>map[p.id]=p);
   let xi=xiIds.map(id=>map[id]).filter(Boolean);
-  if(xi.length<11){
-    const rest=team.players.filter(p=>!xiIds.includes(p.id)).sort((a,b)=>b.rating-a.rating);
-    while(xi.length<11&&rest.length)xi.push(rest.shift());
-  }
-  const avg=xi.reduce((s,p)=>s+eff(p),0)/xi.length;
-  const att=xi.filter(p=>p.pos==="FW"||p.pos==="MF");
-  const def=xi.filter(p=>p.pos==="DF"||p.pos==="GK");
-  const attR=att.length?att.reduce((s,p)=>s+eff(p),0)/att.length:avg;
-  const defR=def.length?def.reduce((s,p)=>s+eff(p),0)/def.length:avg;
-  return {avg,attR,defR,xi};
+  if(xi.length<11){const rest=team.players.filter(p=>!xiIds.includes(p.id)).sort((a,b)=>eff(b)-eff(a));while(xi.length<11&&rest.length)xi.push(rest.shift());}
+  const slots=form?expandForm(form):xi.map(p=>p.pos); // sin form (IA): cada uno en su puesto natural
+  let defSum=0,defN=0,attSum=0,attN=0,allSum=0;
+  xi.forEach((p,i)=>{
+    const slot=slots[i]||p.pos;
+    const val=slotSkill(p,slot,true)*outPen(p.pos,slot)*espSectorMult(p,slot)*5; // habilidad del hueco * compatibilidad * especialidad * 5
+    allSum+=val;
+    if(slot==="GK"||slot==="DF"){defSum+=val;defN++;}else{attSum+=val;attN++;}
+  });
+  const avg=allSum/xi.length;
+  return {avg,attR:attN?attSum/attN:avg,defR:defN?defSum/defN:avg,xi};
 }
 function poisson(l){const L=Math.exp(-l);let k=0,p=1;do{k++;p*=Math.random();}while(p>L);return k-1;}
 function xiEff(id){const t=S.teams[id];const xi=id===S.user?S.lineupMid.xi:bestXI(t.players,t.form);return xiRating(t,xi).avg;}
@@ -479,14 +534,16 @@ function decideTie(a,b,ga,gb){
   const ea=poisson(Math.max(0.12,0.55+d*0.02)), eb=poisson(Math.max(0.12,0.55-d*0.02)); // prórroga
   ga+=ea;gb+=eb;
   if(ga!==gb)return {winner:ga>gb?a:b,mode:"prorroga",ga,gb};
-  let pa=0,pb=0; // penaltis
-  for(let i=0;i<5;i++){if(Math.random()<0.75+d*0.004)pa++;if(Math.random()<0.75-d*0.004)pb++;}
+  // penaltis: el portero parapenaltis del rival baja tu acierto
+  const savA=keeperHasEsp(S.teams[b],"parapenaltis")?0.07:0, savB=keeperHasEsp(S.teams[a],"parapenaltis")?0.07:0;
+  let pa=0,pb=0;
+  for(let i=0;i<5;i++){if(Math.random()<0.75+d*0.004-savA)pa++;if(Math.random()<0.75-d*0.004-savB)pb++;}
   while(pa===pb){if(Math.random()<0.5+d*0.008)pa++;else pb++;}
   return {winner:pa>pb?a:b,mode:"penaltis",ga,gb,pa,pb};
 }
-function simMatch(homeId,awayId,homeXi,awayXi){
+function simMatch(homeId,awayId,homeXi,awayXi,homeForm,awayForm){
   const H=S.teams[homeId],A=S.teams[awayId];
-  const hr=xiRating(H,homeXi),ar=xiRating(A,awayXi);
+  const hr=xiRating(H,homeXi,homeForm),ar=xiRating(A,awayXi,awayForm);
   const HOME=3.2;
   const dh=(hr.attR-ar.defR)+HOME, da=(ar.attR-hr.defR)-HOME*0.5;
   const xgH=Math.max(0.18,Math.min(4.4,1.35+dh*0.055));
@@ -494,16 +551,20 @@ function simMatch(homeId,awayId,homeXi,awayXi){
   const gh=poisson(xgH),ga=poisson(xgA);
   return {homeId,awayId,gh,ga,events:makeEvents(H,hr.xi,gh,A,ar.xi,ga)};
 }
-function scorer(xi){
-  const w=xi.map(p=>{const b=p.pos==="FW"?6:p.pos==="MF"?2.4:p.pos==="DF"?0.5:0.05;return b*p.rating;});
-  const tot=w.reduce((a,b)=>a+b,0);let r=Math.random()*tot;
-  for(let i=0;i<xi.length;i++){r-=w[i];if(r<=0)return xi[i];}
-  return xi[xi.length-1];
-}
+function pickW(arr,wf){const w=arr.map(wf);const tot=w.reduce((a,b)=>a+b,0);if(tot<=0)return arr[rnd(arr.length)];let r=Math.random()*tot;for(let i=0;i<arr.length;i++){r-=w[i];if(r<=0)return arr[i];}return arr[arr.length-1];}
+function scorer(xi){return pickW(xi,p=>Math.pow(sk(p,"ano",true),2)*(p.pos==="FW"?1.6:p.pos==="MF"?1:p.pos==="DF"?0.35:0.05));} // marca según anotación
+function assister(xi,scId){const cand=xi.filter(p=>p.id!==scId);if(!cand.length)return null;return pickW(cand,p=>Math.pow(sk(p,"pas",true),2)*(p.pos==="MF"?1.4:p.pos==="FW"?1:p.pos==="DF"?0.7:0.1)*(p.esp==="centros"?1.6:1)).id;} // asiste según pases (los de centros, más)
+function bestBalon(xi){const b=xi.filter(p=>p.esp==="balon");return b.length?b.sort((a,c)=>sk(c,"tl",true)-sk(a,"tl",true))[0]:null;}
 function makeEvents(H,hXi,gh,A,aXi,ga){
+  const one=(team,xi)=>{
+    const bm=bestBalon(xi);
+    const setPiece=Math.random()<(bm?0.30:0.16); // gol de estrategia (falta/penalti)
+    const sc=setPiece?(bm||pickW(xi,p=>Math.pow(sk(p,"tl",true),2))):scorer(xi);
+    return {min:1+rnd(93),team:team.id,who:sc.id,assist:setPiece?null:assister(xi,sc.id),sp:setPiece};
+  };
   const evs=[];
-  for(let i=0;i<gh;i++)evs.push({min:1+rnd(93),team:H.id,who:scorer(hXi).id});
-  for(let i=0;i<ga;i++)evs.push({min:1+rnd(93),team:A.id,who:scorer(aXi).id});
+  for(let i=0;i<gh;i++)evs.push(one(H,hXi));
+  for(let i=0;i<ga;i++)evs.push(one(A,aXi));
   return evs.sort((a,b)=>a.min-b.min);
 }
 function applyResult(r){
@@ -512,7 +573,7 @@ function applyResult(r){
   if(r.gh>r.ga){H.g++;A.p++;H.pts+=3;H.hist.push("W");A.hist.push("L");}
   else if(r.gh<r.ga){A.g++;H.p++;A.pts+=3;A.hist.push("W");H.hist.push("L");}
   else{H.e++;A.e++;H.pts++;A.pts++;H.hist.push("D");A.hist.push("D");}
-  r.events.forEach(e=>{const pl=S.teams[e.team].players.find(p=>p.id===e.who);if(pl)pl.goles++;});
+  r.events.forEach(e=>{const T=S.teams[e.team];const pl=T.players.find(p=>p.id===e.who);if(pl)pl.goles++;if(e.assist){const ap=T.players.find(p=>p.id===e.assist);if(ap)ap.asis=(ap.asis||0)+1;}});
 }
 
 /* ---------- entrenamiento y cantera ---------- */
@@ -613,11 +674,11 @@ function release(id){
   if(S.lineupMid.xi.includes(id))S.lineupMid.xi=bestXI(team.players,S.lineupMid.form);
   pendingRelease=null;releaseMsg="";render();
 }
-function lineStrength(team,xiIds){
+function lineStrength(team,xiIds){ // fuerzas del once por habilidad (1-20)
   const map={};team.players.forEach(p=>map[p.id]=p);
   const xi=xiIds.map(id=>map[id]).filter(Boolean);
-  const by=pos=>{const a=xi.filter(p=>p.pos===pos);return a.length?a.reduce((s,p)=>s+eff(p),0)/a.length:0;};
-  return {POR:by("GK"),DEF:by("DF"),MED:by("MF"),ATA:by("FW")};
+  const avgBy=(pos,fn)=>{const a=xi.filter(p=>p.pos===pos);return a.length?a.reduce((s,p)=>s+fn(p),0)/a.length:0;};
+  return {POR:avgBy("GK",p=>sk(p,"por",true)),DEF:avgBy("DF",p=>sk(p,"def",true)),MED:avgBy("MF",p=>(sk(p,"jug",true)+sk(p,"pas",true))/2),ATA:avgBy("FW",p=>sk(p,"ano",true))};
 }
 
 /* ---------- entre semana: calendario de 32 semanas, Copa y amistosos ---------- */
@@ -658,7 +719,7 @@ function playFriendlies(pairs){
   return pairs.map(([h,a])=>{
     const hXi=h===S.user?S.lineupMid.xi:bestXI(S.teams[h].players,S.teams[h].form);
     const aXi=a===S.user?S.lineupMid.xi:bestXI(S.teams[a].players,S.teams[a].form);
-    const r=simMatch(h,a,hXi,aXi);
+    const r=simMatch(h,a,hXi,aXi,h===S.user?S.lineupMid.form:undefined,a===S.user?S.lineupMid.form:undefined);
     return {homeId:h,awayId:a,gh:r.gh,ga:r.ga,events:r.events};
   });
 }
@@ -678,7 +739,7 @@ function playCopa(single,leg){
     const home=single?t.a:(leg===0?t.a:t.b), away=single?t.b:(leg===0?t.b:t.a);
     const hXi=home===S.user?S.lineupMid.xi:bestXI(S.teams[home].players,S.teams[home].form);
     const aXi=away===S.user?S.lineupMid.xi:bestXI(S.teams[away].players,S.teams[away].form);
-    const r=simMatch(home,away,hXi,aXi);
+    const r=simMatch(home,away,hXi,aXi,home===S.user?S.lineupMid.form:undefined,away===S.user?S.lineupMid.form:undefined);
     if(single){t.sh=r.gh;t.sa=r.ga;}else if(leg===0){t.ga+=r.gh;t.gb+=r.ga;}else{t.gb+=r.gh;t.ga+=r.ga;}
     rows.push({homeId:home,awayId:away,gh:r.gh,ga:r.ga,events:r.events,tie:t,decidesTie:decides});
   });
@@ -714,7 +775,7 @@ function playCLGroups(md){
     const home=lowerHome(x,y),away=home===x?y:x;
     const hXi=home===S.user?S.lineupMid.xi:bestXI(S.teams[home].players,S.teams[home].form);
     const aXi=away===S.user?S.lineupMid.xi:bestXI(S.teams[away].players,S.teams[away].form);
-    const r=simMatch(home,away,hXi,aXi);const T=gr.table;
+    const r=simMatch(home,away,hXi,aXi,home===S.user?S.lineupMid.form:undefined,away===S.user?S.lineupMid.form:undefined);const T=gr.table;
     T[home].gf+=r.gh;T[home].gc+=r.ga;T[away].gf+=r.ga;T[away].gc+=r.gh;
     if(r.gh>r.ga){T[home].g++;T[home].pts+=3;T[away].p++;}else if(r.gh<r.ga){T[away].g++;T[away].pts+=3;T[home].p++;}else{T[home].e++;T[away].e++;T[home].pts++;T[away].pts++;}
     rows.push({homeId:home,awayId:away,gh:r.gh,ga:r.ga,events:r.events});
@@ -737,7 +798,7 @@ function playCLKO(){
     const home=lowerHome(t.a,t.b),away=home===t.a?t.b:t.a;
     const hXi=home===S.user?S.lineupMid.xi:bestXI(S.teams[home].players,S.teams[home].form);
     const aXi=away===S.user?S.lineupMid.xi:bestXI(S.teams[away].players,S.teams[away].form);
-    const r=simMatch(home,away,hXi,aXi);
+    const r=simMatch(home,away,hXi,aXi,home===S.user?S.lineupMid.form:undefined,away===S.user?S.lineupMid.form:undefined);
     const ga=home===t.a?r.gh:r.ga, gb=home===t.a?r.ga:r.gh;
     const dec=decideTie(t.a,t.b,ga,gb);
     t.sh=dec.ga;t.sa=dec.gb;t.winner=dec.winner;t.mode=dec.mode;t.pa=dec.pa;t.pb=dec.pb;winners.push(dec.winner);
@@ -766,7 +827,7 @@ function playSuperTies(ties){
   return ties.map(t=>{
     const hXi=t.a===S.user?S.lineupMid.xi:bestXI(S.teams[t.a].players,S.teams[t.a].form);
     const aXi=t.b===S.user?S.lineupMid.xi:bestXI(S.teams[t.b].players,S.teams[t.b].form);
-    const r=simMatch(t.a,t.b,hXi,aXi); // campo neutral
+    const r=simMatch(t.a,t.b,hXi,aXi,t.a===S.user?S.lineupMid.form:undefined,t.b===S.user?S.lineupMid.form:undefined); // campo neutral
     const dec=decideTie(t.a,t.b,r.gh,r.ga);
     t.sh=dec.ga;t.sa=dec.gb;t.winner=dec.winner;t.mode=dec.mode;t.pa=dec.pa;t.pb=dec.pb;
     return {homeId:t.a,awayId:t.b,gh:r.gh,ga:r.ga,events:r.events,tie:t,decidesTie:true};
@@ -819,13 +880,13 @@ function simMidweek(w){
 function simJornada(){
   if(S.finished)return;
   const w=S.jornada,lr=leagueRound(w),team=S.teams[S.user];
-  const before={};team.players.forEach(p=>before[p.id]=R(p.rating));
+  const before={};team.players.forEach(p=>before[p.id]=nivel(p));
   const ligaSet=new Set(S.lineup.xi), midSet=new Set(S.lineupMid.xi);
   // Fin de semana: liga (w2-29) o amistoso (semanas sin liga)
   let res=null,weekendAmis=null,weekendComp="amistoso";
   if(lr>=0){
     res={};
-    for(let div=1;div<=NDIV;div++){res[div]=[];for(const [h,a] of S.leagueCal[div][lr]){const hXi=h===S.user?S.lineup.xi:bestXI(S.teams[h].players,S.teams[h].form);const aXi=a===S.user?S.lineup.xi:bestXI(S.teams[a].players,S.teams[a].form);const r=simMatch(h,a,hXi,aXi);applyResult(r);res[div].push(r);}}
+    for(let div=1;div<=NDIV;div++){res[div]=[];for(const [h,a] of S.leagueCal[div][lr]){const hXi=h===S.user?S.lineup.xi:bestXI(S.teams[h].players,S.teams[h].form);const aXi=a===S.user?S.lineup.xi:bestXI(S.teams[a].players,S.teams[a].form);const r=simMatch(h,a,hXi,aXi,h===S.user?S.lineup.form:undefined,a===S.user?S.lineup.form:undefined);applyResult(r);res[div].push(r);}}
     weekendComp="liga";
   }else{
     weekendAmis=allFriendlies(Object.keys(S.teams));
@@ -837,7 +898,7 @@ function simJornada(){
   trainFromGame(midSet,1);
   gainExp(midSet,COMP_MULT[mid.userComp]||COMP_MULT.amistoso);
   weeklyDecline();
-  const cBefore={};S.cantera.forEach(p=>cBefore[p.id]=R(p.rating));
+  const cBefore={};S.cantera.forEach(p=>cBefore[p.id]=nivel(p));
   academyTrain();
   const pos=S.youthPlan[w];
   let nuevos=[],crackName=null;
@@ -851,8 +912,8 @@ function simJornada(){
     }
     const p=genProspect(canteraStr(),cpos,isCrack);nuevos=addYouths([p]);if(isCrack&&S.cantera.includes(p))crackName=p.name;
   }
-  const ups=[];team.players.forEach(p=>{const a=R(p.rating);if(a!==before[p.id])ups.push({name:p.name,pos:p.pos,from:before[p.id],to:a,up:a>before[p.id]});});
-  const canteraUps=S.cantera.filter(p=>cBefore[p.id]!==undefined&&R(p.rating)>cBefore[p.id]).map(p=>({name:p.name,pos:p.pos,from:cBefore[p.id],to:R(p.rating)}));
+  const ups=[];team.players.forEach(p=>{const a=nivel(p);if(a!==before[p.id])ups.push({name:p.name,pos:p.pos,from:before[p.id],to:a,up:a>before[p.id]});});
+  const canteraUps=S.cantera.filter(p=>cBefore[p.id]!==undefined&&nivel(p)>cBefore[p.id]).map(p=>({name:p.name,pos:p.pos,from:cBefore[p.id],to:nivel(p)}));
   S.lastDev={ups,nuevos,crack:crackName,canteraUps};
   S.lastResults={week:w,lr,results:res,weekendAmis,mid};
   if(lr>=0)S.history[lr]=res;
@@ -950,6 +1011,13 @@ function stars(str){const n=Math.max(1,Math.min(5,Math.round((str-52)/8)));retur
 function potStars(pot){const n=Math.max(1,Math.min(5,Math.round((pot-52)/9)));return `<span class="potstars">${"★".repeat(n)}<span class="off">${"★".repeat(5-n)}</span></span>`;}
 function formBadge(hist){const last=hist.slice(-5);if(!last.length)return '<span class="muted" style="font-size:12px">—</span>';return '<span class="form-badge">'+last.map(r=>`<b class="fb-${r}">${r}</b>`).join("")+'</span>';}
 function isPromesa(p){return p.edad<=21&&(p.potencial-p.rating)>=8;}
+function skColor(v){ // color por habilidad 1-20
+  if(v>=16)return "background:color-mix(in srgb,var(--grass) 30%,transparent);color:var(--grass-ink)";
+  if(v>=12)return "background:color-mix(in srgb,#5b8def 26%,transparent);color:#8fb4ff";
+  if(v>=8)return "background:color-mix(in srgb,var(--gold) 26%,transparent);color:var(--gold-ink)";
+  return "background:color-mix(in srgb,var(--bad) 22%,transparent);color:var(--bad)";}
+function espBadge(p){return p.esp?`<span class="badge-crack" title="${ESP[p.esp]}">✦ ${ESP_SHORT[p.esp]}</span>`:"";}
+function skillCells(p){return SKILL_KEYS.map(k=>`<td class="num" style="padding:6px 4px"><span style="display:inline-block;min-width:24px;border-radius:6px;padding:1px 0;font-weight:700;${skColor(sk(p,k,false))}">${sk(p,k,false)}</span></td>`).join("");}
 
 /* ---------- render ---------- */
 function render(){
@@ -1036,32 +1104,32 @@ function playerRow(p){
   else action=`<button class="relbtn" data-rel="${p.id}" title="Despedir a ${p.name}" aria-label="Despedir">✕</button>`;
   return `<tr>
     <td><span class="pill p-${p.pos}">${p.pos}</span></td>
-    <td class="nm" style="font-weight:600">${p.name} ${isPromesa(p)?'<span class="badge-prom">PROMESA</span>':''}</td>
+    <td class="nm" style="font-weight:600">${p.name} ${isPromesa(p)?'<span class="badge-prom">PROMESA</span>':''}${p.esp?" "+espBadge(p):""}</td>
     <td class="num">${p.edad}</td>
-    <td class="num">${p.goles||"·"}</td>
-    <td style="text-align:center"><span class="rating" style="${ratColor(p.rating)}">${R(p.rating)}</span></td>
-    <td class="num" style="color:var(--gold-ink);font-weight:700" title="Bonus por experiencia">+${R(expBonus(p))}</td>
-    <td style="text-align:center"><span class="rating" style="${ratColor(eff(p))};box-shadow:0 0 0 1px var(--line) inset" title="Media + experiencia, con tope 99">${R(eff(p))}</span></td>
+    <td style="text-align:center"><span class="rating" style="${skColor(nivel(p))}" title="Nivel en campo (media de habilidades + experiencia)">${nivel(p)}</span></td>
+    ${skillCells(p)}
     <td>${potStars(p.potencial)}</td>
+    <td class="num">${p.goles||"·"}</td>
     <td style="text-align:right">${action}</td>
   </tr>`;
 }
 function viewSquad(){
   const t=S.teams[S.user];
   const order={GK:0,DF:1,MF:2,FW:3};
-  const players=t.players.slice().sort((a,b)=>order[a.pos]-order[b.pos]||b.rating-a.rating);
-  const avg=R(players.reduce((s,p)=>s+p.rating,0)/players.length);
+  const players=t.players.slice().sort((a,b)=>order[a.pos]-order[b.pos]||eff(b)-eff(a));
+  const avg=R(players.reduce((s,p)=>s+nivel(p),0)/players.length);
   const msg=releaseMsg?`<div class="devnote" style="background:color-mix(in srgb,var(--bad) 10%,transparent);border-color:var(--bad)"><div class="dt" style="color:var(--bad)">Aviso</div><div style="font-size:13px;margin-top:4px">${releaseMsg}</div></div>`:"";
+  const skHead=SKILLS.map(s=>`<th class="num" title="${s[2]}">${s[1]}</th>`).join("");
   return navHtml("squad")+`
     <div class="selrow">
       <h2 class="sect-title" style="margin:0">${crestInline(t)} Plantilla · ${t.short}</h2>
-      <span class="pill" style="background:var(--surface-3);color:var(--muted)">Media ${avg}</span>
+      <span class="pill" style="background:var(--surface-3);color:var(--muted)">Nivel medio ${avg}/20</span>
       <span class="pill" style="background:var(--surface-3);color:var(--muted)">${players.length} jugadores</span>
     </div>
-    <p class="sub"><b>Media</b> = habilidad (sube entrenando, baja con la edad). <b>Exp</b> = experiencia ganada jugando. <b>En campo</b> = lo que de verdad rinde = Media + Exp, <b>con tope 99</b> (por eso a un crack de media alta el +Exp casi no le suma, pero a uno flojo o veterano sí). Las estrellas doradas son el <b>potencial</b>. La ✕ despide (con confirmación).</p>
+    <p class="sub">Habilidades <b>1-20</b>: POR portería · DEF defensa · JUG jugadas · PAS pases (asistencias) · ANO anotación · TL tiros libres. <b>Nivel</b> = en campo (habilidades + experiencia). ✦ = especialidad. Las estrellas son el <b>potencial</b>.</p>
     ${msg}
     <div class="card"><div class="tbl-scroll"><table>
-      <thead><tr><th>Pos</th><th>Jugador</th><th class="num">Edad</th><th class="num">Goles</th><th style="text-align:center">Media</th><th class="num">Exp</th><th style="text-align:center">En campo</th><th>Potencial</th><th></th></tr></thead>
+      <thead><tr><th>Pos</th><th>Jugador</th><th class="num">Edad</th><th style="text-align:center">Nivel</th>${skHead}<th>Pot.</th><th class="num">Gol</th><th></th></tr></thead>
       <tbody>${players.map(playerRow).join("")}</tbody></table></div></div>`;
 }
 function bindSquad(){
@@ -1072,15 +1140,15 @@ function bindSquad(){
 
 let lineupTab="liga",swapSel=null,swapMsg="";
 function activeLineup(){return lineupTab==="mid"?S.lineupMid:S.lineup;}
-function luRow(p,starter,selPos){
+function luRow(p,slot){ // slot = puesto del hueco (para marcar fuera de posición)
   const sel=swapSel===p.id;
-  const dim=swapSel&&!sel&&selPos&&p.pos!==selPos; // resaltar solo los intercambiables (misma posición)
-  const st=`cursor:pointer;${sel?"box-shadow:inset 0 0 0 2px var(--accent);":""}${dim?"opacity:.4;":""}`;
+  const st=`cursor:pointer;${sel?"box-shadow:inset 0 0 0 2px var(--accent);":""}`;
   const crk=p.crack?' 💎':'', prom=(!p.crack&&isPromesa(p))?' <span class="badge-prom">PROM</span>':'';
+  const fp=(slot&&slot!==p.pos)?` <span class="badge-prom" style="background:color-mix(in srgb,var(--bad) 20%,transparent);color:var(--bad)" title="Fuera de su posición: rinde peor">⚠ ${slot}</span>`:"";
   return `<div class="lineup-slot" data-swap="${p.id}" style="${st}">
     <span class="slot-lab p-${p.pos}" style="border-radius:6px;padding:2px 0">${p.pos}</span>
-    <span style="flex:1;font-weight:600;font-size:14px">${p.name}${crk}${prom} <span class="muted" style="font-weight:400">${p.edad}a</span></span>
-    <span class="slot-meta"><span class="rating" style="${ratColor(eff(p))};width:auto;padding:0 7px" title="En campo (media+exp)">${R(eff(p))}</span>${potStars(p.potencial)}</span>
+    <span style="flex:1;font-weight:600;font-size:14px">${p.name}${crk}${prom}${p.esp?" "+espBadge(p):""}${fp} <span class="muted" style="font-weight:400">${p.edad}a</span></span>
+    <span class="slot-meta"><span class="rating" style="${skColor(nivel(p))};width:auto;padding:0 7px" title="Nivel en campo">${nivel(p)}</span>${potStars(p.potencial)}</span>
   </div>`;
 }
 function viewLineup(){
@@ -1094,23 +1162,23 @@ function viewLineup(){
   const selPos=swapSel&&map[swapSel]?map[swapSel].pos:null;
   const L=lineStrength(t,lu.xi);
   const colors={POR:"var(--gold)",DEF:"var(--grass)",MED:"#5b8def",ATA:"var(--accent)"};
-  const bar=(k,label)=>`<div class="linebar"><span class="ll">${label}</span><div class="track"><div class="fill" style="width:${Math.min(100,R(L[k]))}%;background:${colors[k]}"></div></div><span class="lv">${R(L[k])}</span></div>`;
+  const bar=(k,label)=>`<div class="linebar"><span class="ll">${label}</span><div class="track"><div class="fill" style="width:${Math.min(100,L[k]/20*100)}%;background:${colors[k]}"></div></div><span class="lv">${R(L[k])}/20</span></div>`;
   const tab=(k,l,sub)=>`<button class="focusbtn ${lineupTab===k?"on":""}" data-lutab="${k}" style="flex:0 1 auto;min-width:130px"><div class="fl" style="font-size:15px">${l}</div><div class="fs">${sub}</div></button>`;
   const msg=swapMsg?`<div class="devnote" style="background:color-mix(in srgb,var(--bad) 10%,transparent);border-color:var(--bad)"><div style="font-size:13px">${swapMsg}</div></div>`:"";
   return navHtml("lineup")+`
     <h2 class="sect-title">Alineación</h2>
-    <p class="sub">Dos onces: uno para la <b>liga</b> y otro para <b>entre semana</b> (copa/amistoso). Para cambiar el once, <b>toca un jugador y luego otro de su misma posición</b> para intercambiarlos (titular↔suplente o entre suplentes). Solo entrenan los que juegan.</p>
+    <p class="sub">Dos onces: <b>liga</b> y <b>entre semana</b> (copa/amistoso). Toca un jugador y luego otro para <b>intercambiarlos</b> (titular↔suplente o entre suplentes). Puedes poner a cualquiera en cualquier hueco, pero <b>fuera de su puesto rinde peor</b> (aviso ⚠). Solo entrenan los que juegan.</p>
     <div class="focusrow" style="margin-bottom:14px">${tab("liga","Once de Liga","fin de semana")}${tab("mid","Once entre semana","copa / amistoso")}</div>
     <div class="selrow">
       <select class="fm" id="formSel">${Object.keys(FORMACIONES).map(f=>`<option ${f===form?"selected":""}>${f}</option>`).join("")}</select>
       <button class="btn ghostgold sm" id="autoBtn">Auto (mejor 11)</button>
-      <span class="pill" style="background:var(--surface-3);color:var(--muted)">Fuerza 11 (media+exp): ${rating}</span>
+      <span class="pill" style="background:var(--surface-3);color:var(--muted)">Nivel del 11: ${R(rating/5)}/20</span>
     </div>
     ${msg}
     <div class="grid2">
       <div>
         <div class="sect-title" style="font-size:15px;color:var(--faint);margin:0 0 6px">Titulares (${form})</div>
-        <div class="card" style="padding:6px 10px">${xiP.map(p=>luRow(p,true,selPos)).join("")}</div>
+        <div class="card" style="padding:6px 10px">${xiP.map((p,i)=>luRow(p,expandForm(form)[i])).join("")}</div>
       </div>
       <div class="card" style="padding:16px">
         <div class="sect-title" style="font-size:15px;color:var(--faint);margin-bottom:6px">Fuerzas del once (${lineupTab==="mid"?"entre semana":"liga"})</div>
@@ -1119,7 +1187,7 @@ function viewLineup(){
       </div>
     </div>
     <div class="sect-title" style="font-size:15px;color:var(--faint);margin:20px 0 6px">Banquillo · ${bench.length} jugadores</div>
-    <div class="card" style="padding:6px 10px">${bench.length?bench.map(p=>luRow(p,false,selPos)).join(""):'<div class="muted" style="padding:12px">Todos tus jugadores están en el once.</div>'}</div>`;
+    <div class="card" style="padding:6px 10px">${bench.length?bench.map(p=>luRow(p)).join(""):'<div class="muted" style="padding:12px">Todos tus jugadores están en el once.</div>'}</div>`;
 }
 function bindLineup(){
   document.querySelectorAll("[data-lutab]").forEach(b=>b.onclick=()=>{lineupTab=b.dataset.lutab;swapSel=null;swapMsg="";render();});
@@ -1132,7 +1200,6 @@ function bindLineup(){
     if(!swapSel){swapSel=id;swapMsg="";render();return;}
     if(swapSel===id){swapSel=null;render();return;}
     const a=swapSel,b=id;swapSel=null;
-    if(map[a].pos!==map[b].pos){swapMsg="Solo puedes intercambiar jugadores de la misma posición.";render();return;}
     const xi=lu.xi.slice();const ia=xi.indexOf(a),ib=xi.indexOf(b);
     if(ia>-1&&ib>-1){const tmp=xi[ia];xi[ia]=xi[ib];xi[ib]=tmp;}
     else if(ia>-1)xi[ia]=b; else if(ib>-1)xi[ib]=a; else {render();return;}
@@ -1160,7 +1227,7 @@ function viewTraining(){
     return `<tr>
       <td class="nm" style="font-weight:600"><span class="pill p-${p.pos}">${p.pos}</span> ${p.name} ${isPromesa(p)?'<span class="badge-prom">PROMESA</span>':''}</td>
       <td class="num">${p.edad}</td>
-      <td style="text-align:center"><span class="rating" style="${ratColor(p.rating)}">${R(p.rating)}</span></td>
+      <td style="text-align:center"><span class="rating" style="${skColor(nivel(p))}">${nivel(p)}</span></td>
       <td>${potStars(p.potencial)}</td>
       <td>${juega}</td>
       <td style="text-align:right">${proj}</td>
@@ -1213,7 +1280,7 @@ function viewCantera(){
       <span class="pill p-${p.pos}">${p.pos}</span>
       <div class="who">
         <div class="nm">${p.name} ${p.crack?'<span class="badge-crack">💎 CRACK</span>':'<span class="badge-prom">CANTERA</span>'}</div>
-        <div class="mt">${p.edad} años · nivel actual ${R(p.rating)} · potencial ${potStars(p.potencial)}</div>
+        <div class="mt">${p.edad} años · nivel ${nivel(p)}/20 · potencial ${potStars(p.potencial)}${p.esp?" · "+espBadge(p):""}</div>
       </div>
       <div style="display:flex;align-items:center;gap:8px">${act}</div>
     </div>`;
@@ -1295,7 +1362,7 @@ function copaTieRow(t){
   else if(t.mode==="penaltis")tag=`<span class="muted" style="font-size:11px">penaltis ${t.pa}-${t.pb}</span>`;
   return `<div class="match ${you}"><div class="h"><span class="tn">${nA}</span>${crest(A,24)}</div><span class="sc" title="marcador de la eliminatoria">${sc}</span><div class="a">${crest(B,24)}<span class="tn">${nB}</span></div>${tag?`<div style="grid-column:1/-1;text-align:center;margin-top:4px">${tag}</div>`:""}</div>`;
 }
-function eventsHtml(events){return `<div class="events">${events.map(e=>{const pl=S.teams[e.team].players.find(p=>p.id===e.who);return `<div class="ev"><span class="min">${e.min}'</span><span>⚽ ${pl?pl.name:"—"} <span class="muted">(${S.teams[e.team].abbr})</span></span></div>`;}).join("")}</div>`;}
+function eventsHtml(events){return `<div class="events">${events.map(e=>{const T=S.teams[e.team];const pl=T.players.find(p=>p.id===e.who);const ap=e.assist?T.players.find(p=>p.id===e.assist):null;const tag=e.sp?' <span class="muted">(balón parado)</span>':(ap?` <span class="muted">· asist. ${ap.name}</span>`:'');return `<div class="ev"><span class="min">${e.min}'</span><span>⚽ ${pl?pl.name:"—"} <span class="muted">(${T.abbr})</span>${tag}</span></div>`;}).join("")}</div>`;}
 function cupCard(r,evUser){ // partido de copa en Resultados: marcador + ganador (negrita) + prórroga/penaltis + global si es a doble
   const H=S.teams[r.homeId],A=S.teams[r.awayId];const you=(r.homeId===S.user||r.awayId===S.user)?"you":"";
   const t=r.tie;let hn=H.short,an=A.short,foot="";
@@ -1406,8 +1473,7 @@ function viewResults(){
   }
   const mCard=(r,sz,evUser)=>{
     const H=S.teams[r.homeId],A=S.teams[r.awayId];const you=(r.homeId===S.user||r.awayId===S.user)?"you":"";
-    let ev="";
-    if(evUser&&r.events&&r.events.length)ev=`<div class="events">${r.events.map(e=>{const pl=S.teams[e.team].players.find(p=>p.id===e.who);return `<div class="ev"><span class="min">${e.min}'</span><span>⚽ ${pl?pl.name:"—"} <span class="muted">(${S.teams[e.team].abbr})</span></span></div>`;}).join("")}</div>`;
+    const ev=(evUser&&r.events&&r.events.length)?eventsHtml(r.events):"";
     return `<div class="match ${you}"><div class="h"><span class="tn">${H.short}</span>${crest(H,sz)}</div><span class="sc"${sz<26?' style="font-size:18px;min-width:56px"':''}>${r.gh} - ${r.ga}</span><div class="a">${crest(A,sz)}<span class="tn">${A.short}</span></div>${ev}</div>`;
   };
   // Fin de semana
@@ -1446,7 +1512,7 @@ function bindResults(){
 }
 
 /* ---------- guardar / cargar partida ---------- */
-const SAVE_KEY="euskalliga_save_v1";
+const SAVE_KEY="euskalliga_save_v2"; // v2: modelo de 6 habilidades 1-20 (las partidas del modelo viejo no cargan)
 function saveGame(){try{localStorage.setItem(SAVE_KEY,JSON.stringify(S));}catch(e){}}
 function loadSaved(){try{const s=localStorage.getItem(SAVE_KEY);return s?JSON.parse(s):null;}catch(e){return null;}}
 function restoreRuntime(){ // tras cargar: recomponer contadores de ids/nombres y limpiar estado de UI
