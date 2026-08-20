@@ -379,28 +379,32 @@ function slotSkill(p,slot,useEff){ // habilidad que aporta el jugador en ese hue
   return sk(p,"ano",useEff);
 }
 /* ---------- especialidades (raras, dan un plus concreto) ---------- */
-const ESP={regate:"Regateador",posesion:"Especialista en tener el balón",centros:"Especialista en centros",aguerrido:"Defensa aguerrido",ladron:"Ladrón de balón",balon:"Especialista a balón parado",parapenaltis:"Portero parapenaltis"};
-const ESP_SHORT={regate:"Regates",posesion:"Posesión",centros:"Centros",aguerrido:"Aguerrido",ladron:"Robo",balon:"Balón parado",parapenaltis:"Parapenaltis"};
+const ESP={regate:"Regateador",posesion:"Especialista en tener el balón",centros:"Especialista en centros",aguerrido:"Defensa aguerrido",ladron:"Ladrón de balón",balon:"Especialista a balón parado",parapenaltis:"Portero parapenaltis",cabeceador:"Cabeceador",rapido:"Rápido",killer:"Killer del área",motor:"Motor",lider:"Líder",provocador:"Provocador",penaltis:"Especialista en penaltis",sangrefria:"Sangre fría"};
+const ESP_SHORT={regate:"Regates",posesion:"Posesión",centros:"Centros",aguerrido:"Aguerrido",ladron:"Robo",balon:"Balón parado",parapenaltis:"Parapenaltis",cabeceador:"Cabeceador",rapido:"Rápido",killer:"Killer",motor:"Motor",lider:"Líder",provocador:"Provocador",penaltis:"Penaltis",sangrefria:"Sangre fría"};
 function mkEsp(pos){
   if(Math.random()>0.18)return null; // la mayoría no tiene especialidad
   const pools={
-    GK:[["parapenaltis",0.8],["balon",1]],
-    DF:[["aguerrido",0.45],["ladron",0.8],["balon",1]],
-    MF:[["regate",0.3],["posesion",0.55],["ladron",0.75],["centros",0.9],["balon",1]],
-    FW:[["regate",0.45],["centros",0.7],["balon",0.9],["posesion",1]],
+    GK:[["parapenaltis",0.55],["lider",0.7],["motor",0.82],["sangrefria",0.93],["balon",1]],
+    DF:[["aguerrido",0.28],["ladron",0.46],["provocador",0.6],["cabeceador",0.72],["lider",0.8],["rapido",0.88],["balon",0.94],["motor",0.98],["sangrefria",1]],
+    MF:[["regate",0.2],["posesion",0.36],["centros",0.5],["ladron",0.6],["balon",0.7],["lider",0.78],["motor",0.85],["rapido",0.91],["penaltis",0.96],["sangrefria",1]],
+    FW:[["regate",0.22],["killer",0.4],["cabeceador",0.54],["centros",0.66],["balon",0.74],["rapido",0.84],["penaltis",0.92],["sangrefria",0.98],["motor",1]],
   };
   const r=Math.random();for(const [k,acc] of pools[pos])if(r<acc)return k;
   return null;
 }
-function espSectorMult(p,slot){ // efectos que suben la fuerza de sector
-  const e=p.esp;if(!e)return 1;
+function espSectorMult(p,slot,big){ // efectos que suben la fuerza de sector
+  const e=p.esp;if(!e)return 1;let m=1;
   const atk=(slot==="MF"||slot==="FW"), def=(slot==="DF"||slot==="GK");
-  if(e==="aguerrido"&&def)return 1.12;
-  if(e==="ladron"&&(def||slot==="MF"))return 1.10;
-  if(e==="regate"&&atk)return 1.12;
-  if(e==="posesion"&&slot==="MF")return 1.10;
-  if(e==="centros"&&atk)return 1.06;
-  return 1;
+  if(e==="aguerrido"&&def)m*=1.12;
+  if(e==="ladron"&&(def||slot==="MF"))m*=1.10;
+  if(e==="provocador"&&(def||slot==="MF"))m*=1.10; // recupera (arriesga tarjetas: con sanciones)
+  if(e==="regate"&&atk)m*=1.12;
+  if(e==="posesion"&&slot==="MF")m*=1.10;
+  if(e==="centros"&&atk)m*=1.06;
+  if(e==="rapido"&&atk)m*=1.05;
+  if(e==="motor")m*=1.04; // rinde constante todo el partido
+  if(e==="sangrefria"&&big)m*=1.09; // templanza en partidos importantes (copa/supercopa)
+  return m;
 }
 function teamHasEsp(team,e){return team.players.some(p=>p.esp===e);}
 function keeperHasEsp(team,e){const gk=team.players.filter(p=>p.pos==="GK").sort((a,b)=>eff(b)-eff(a))[0];return gk&&gk.esp===e;}
@@ -510,20 +514,24 @@ function newGame(userTeamId){
 }
 
 /* ---------- simulación ---------- */
-function xiRating(team,xiIds,form){
+function xiRating(team,xiIds,form,big){
   const map={};team.players.forEach(p=>map[p.id]=p);
   let xi=xiIds.map(id=>map[id]).filter(Boolean);
   if(xi.length<11){const rest=team.players.filter(p=>!xiIds.includes(p.id)).sort((a,b)=>eff(b)-eff(a));while(xi.length<11&&rest.length)xi.push(rest.shift());}
   const slots=form?expandForm(form):xi.map(p=>p.pos); // sin form (IA): cada uno en su puesto natural
-  let defSum=0,defN=0,attSum=0,attN=0,allSum=0;
+  let defSum=0,defN=0,attSum=0,attN=0,allSum=0,hasLider=false;
   xi.forEach((p,i)=>{
     const slot=slots[i]||p.pos;
-    const val=slotSkill(p,slot,true)*outPen(p.pos,slot)*espSectorMult(p,slot)*5; // habilidad del hueco * compatibilidad * especialidad * 5
+    let pen=outPen(p.pos,slot);
+    if(p.esp==="rapido"&&pen<1)pen=Math.min(1,pen+0.15); // se adapta mejor fuera de su puesto
+    const val=slotSkill(p,slot,true)*pen*espSectorMult(p,slot,big)*5; // habilidad del hueco * compatibilidad * especialidad * 5
     allSum+=val;
+    if(p.esp==="lider")hasLider=true;
     if(slot==="GK"||slot==="DF"){defSum+=val;defN++;}else{attSum+=val;attN++;}
   });
-  const avg=allSum/xi.length;
-  return {avg,attR:attN?attSum/attN:avg,defR:defN?defSum/defN:avg,xi};
+  const lb=hasLider?1.03:1; // un líder en el campo tira del equipo
+  const avg=allSum/xi.length*lb;
+  return {avg,attR:(attN?attSum/attN:avg)*lb,defR:(defN?defSum/defN:avg)*lb,xi};
 }
 function poisson(l){const L=Math.exp(-l);let k=0,p=1;do{k++;p*=Math.random();}while(p>L);return k-1;}
 function xiEff(id){const t=S.teams[id];const xi=id===S.user?S.lineupMid.xi:bestXI(t.players,t.form);return xiRating(t,xi).avg;}
@@ -534,16 +542,18 @@ function decideTie(a,b,ga,gb){
   const ea=poisson(Math.max(0.12,0.55+d*0.02)), eb=poisson(Math.max(0.12,0.55-d*0.02)); // prórroga
   ga+=ea;gb+=eb;
   if(ga!==gb)return {winner:ga>gb?a:b,mode:"prorroga",ga,gb};
-  // penaltis: el portero parapenaltis del rival baja tu acierto
+  // penaltis: el portero parapenaltis del rival baja tu acierto; especialista en penaltis / sangre fría lo suben
   const savA=keeperHasEsp(S.teams[b],"parapenaltis")?0.07:0, savB=keeperHasEsp(S.teams[a],"parapenaltis")?0.07:0;
+  const edgeA=penEdge(a), edgeB=penEdge(b);
   let pa=0,pb=0;
-  for(let i=0;i<5;i++){if(Math.random()<0.75+d*0.004-savA)pa++;if(Math.random()<0.75-d*0.004-savB)pb++;}
-  while(pa===pb){if(Math.random()<0.5+d*0.008)pa++;else pb++;}
+  for(let i=0;i<5;i++){if(Math.random()<0.75+d*0.004-savA+edgeA)pa++;if(Math.random()<0.75-d*0.004-savB+edgeB)pb++;}
+  while(pa===pb){if(Math.random()<0.5+d*0.008+(edgeA-edgeB))pa++;else pb++;}
   return {winner:pa>pb?a:b,mode:"penaltis",ga,gb,pa,pb};
 }
-function simMatch(homeId,awayId,homeXi,awayXi,homeForm,awayForm){
+function penEdge(id){let e=0;if(teamHasEsp(S.teams[id],"penaltis"))e+=0.05;if(teamHasEsp(S.teams[id],"sangrefria"))e+=0.03;return e;} // ventaja en la tanda
+function simMatch(homeId,awayId,homeXi,awayXi,homeForm,awayForm,big){
   const H=S.teams[homeId],A=S.teams[awayId];
-  const hr=xiRating(H,homeXi,homeForm),ar=xiRating(A,awayXi,awayForm);
+  const hr=xiRating(H,homeXi,homeForm,big),ar=xiRating(A,awayXi,awayForm,big);
   const HOME=3.2;
   const dh=(hr.attR-ar.defR)+HOME, da=(ar.attR-hr.defR)-HOME*0.5;
   const xgH=Math.max(0.18,Math.min(4.4,1.35+dh*0.055));
@@ -552,15 +562,24 @@ function simMatch(homeId,awayId,homeXi,awayXi,homeForm,awayForm){
   return {homeId,awayId,gh,ga,events:makeEvents(H,hr.xi,gh,A,ar.xi,ga)};
 }
 function pickW(arr,wf){const w=arr.map(wf);const tot=w.reduce((a,b)=>a+b,0);if(tot<=0)return arr[rnd(arr.length)];let r=Math.random()*tot;for(let i=0;i<arr.length;i++){r-=w[i];if(r<=0)return arr[i];}return arr[arr.length-1];}
-function scorer(xi){return pickW(xi,p=>Math.pow(sk(p,"ano",true),2)*(p.pos==="FW"?1.6:p.pos==="MF"?1:p.pos==="DF"?0.35:0.05));} // marca según anotación
+function scorer(xi){return pickW(xi,p=>Math.pow(sk(p,"ano",true),2)*(p.pos==="FW"?1.6:p.pos==="MF"?1:p.pos==="DF"?0.35:0.05)*(p.esp==="killer"?2.2:1));} // marca según anotación (el killer del área remata todo)
 function assister(xi,scId){const cand=xi.filter(p=>p.id!==scId);if(!cand.length)return null;return pickW(cand,p=>Math.pow(sk(p,"pas",true),2)*(p.pos==="MF"?1.4:p.pos==="FW"?1:p.pos==="DF"?0.7:0.1)*(p.esp==="centros"?1.6:1)).id;} // asiste según pases (los de centros, más)
 function bestBalon(xi){const b=xi.filter(p=>p.esp==="balon");return b.length?b.sort((a,c)=>sk(c,"tl",true)-sk(a,"tl",true))[0]:null;}
 function makeEvents(H,hXi,gh,A,aXi,ga){
   const one=(team,xi)=>{
     const bm=bestBalon(xi);
-    const setPiece=Math.random()<(bm?0.30:0.16); // gol de estrategia (falta/penalti)
-    const sc=setPiece?(bm||pickW(xi,p=>Math.pow(sk(p,"tl",true),2))):scorer(xi);
-    return {min:1+rnd(93),team:team.id,who:sc.id,assist:setPiece?null:assister(xi,sc.id),sp:setPiece};
+    const pen=xi.filter(p=>p.esp==="penaltis").sort((a,b)=>sk(b,"tl",true)-sk(a,"tl",true));
+    const cab=xi.filter(p=>p.esp==="cabeceador").sort((a,b)=>sk(b,"ano",true)-sk(a,"ano",true));
+    const setPiece=Math.random()<((bm||pen.length)?0.30:0.16); // gol de estrategia (falta/penalti/córner)
+    if(setPiece){
+      const taker=pen[0]||bm||pickW(xi,p=>Math.pow(sk(p,"tl",true),2)); // lanzador (penaltis > balón parado)
+      if(cab.length&&cab[0].id!==taker.id&&Math.random()<0.5){ // rematador de cabeza a la salida del córner/falta
+        return {min:1+rnd(93),team:team.id,who:cab[0].id,assist:taker.id,sp:true};
+      }
+      return {min:1+rnd(93),team:team.id,who:taker.id,assist:null,sp:true};
+    }
+    const sc=scorer(xi);
+    return {min:1+rnd(93),team:team.id,who:sc.id,assist:assister(xi,sc.id),sp:false};
   };
   const evs=[];
   for(let i=0;i<gh;i++)evs.push(one(H,hXi));
@@ -739,7 +758,7 @@ function playCopa(single,leg){
     const home=single?t.a:(leg===0?t.a:t.b), away=single?t.b:(leg===0?t.b:t.a);
     const hXi=home===S.user?S.lineupMid.xi:bestXI(S.teams[home].players,S.teams[home].form);
     const aXi=away===S.user?S.lineupMid.xi:bestXI(S.teams[away].players,S.teams[away].form);
-    const r=simMatch(home,away,hXi,aXi,home===S.user?S.lineupMid.form:undefined,away===S.user?S.lineupMid.form:undefined);
+    const r=simMatch(home,away,hXi,aXi,home===S.user?S.lineupMid.form:undefined,away===S.user?S.lineupMid.form:undefined,true);
     if(single){t.sh=r.gh;t.sa=r.ga;}else if(leg===0){t.ga+=r.gh;t.gb+=r.ga;}else{t.gb+=r.gh;t.ga+=r.ga;}
     rows.push({homeId:home,awayId:away,gh:r.gh,ga:r.ga,events:r.events,tie:t,decidesTie:decides});
   });
@@ -798,7 +817,7 @@ function playCLKO(){
     const home=lowerHome(t.a,t.b),away=home===t.a?t.b:t.a;
     const hXi=home===S.user?S.lineupMid.xi:bestXI(S.teams[home].players,S.teams[home].form);
     const aXi=away===S.user?S.lineupMid.xi:bestXI(S.teams[away].players,S.teams[away].form);
-    const r=simMatch(home,away,hXi,aXi,home===S.user?S.lineupMid.form:undefined,away===S.user?S.lineupMid.form:undefined);
+    const r=simMatch(home,away,hXi,aXi,home===S.user?S.lineupMid.form:undefined,away===S.user?S.lineupMid.form:undefined,true);
     const ga=home===t.a?r.gh:r.ga, gb=home===t.a?r.ga:r.gh;
     const dec=decideTie(t.a,t.b,ga,gb);
     t.sh=dec.ga;t.sa=dec.gb;t.winner=dec.winner;t.mode=dec.mode;t.pa=dec.pa;t.pb=dec.pb;winners.push(dec.winner);
@@ -827,7 +846,7 @@ function playSuperTies(ties){
   return ties.map(t=>{
     const hXi=t.a===S.user?S.lineupMid.xi:bestXI(S.teams[t.a].players,S.teams[t.a].form);
     const aXi=t.b===S.user?S.lineupMid.xi:bestXI(S.teams[t.b].players,S.teams[t.b].form);
-    const r=simMatch(t.a,t.b,hXi,aXi,t.a===S.user?S.lineupMid.form:undefined,t.b===S.user?S.lineupMid.form:undefined); // campo neutral
+    const r=simMatch(t.a,t.b,hXi,aXi,t.a===S.user?S.lineupMid.form:undefined,t.b===S.user?S.lineupMid.form:undefined,true); // campo neutral
     const dec=decideTie(t.a,t.b,r.gh,r.ga);
     t.sh=dec.ga;t.sa=dec.gb;t.winner=dec.winner;t.mode=dec.mode;t.pa=dec.pa;t.pb=dec.pb;
     return {homeId:t.a,awayId:t.b,gh:r.gh,ga:r.ga,events:r.events,tie:t,decidesTie:true};
