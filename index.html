@@ -379,15 +379,15 @@ function slotSkill(p,slot,useEff){ // habilidad que aporta el jugador en ese hue
   return sk(p,"ano",useEff);
 }
 /* ---------- especialidades (raras, dan un plus concreto) ---------- */
-const ESP={regate:"Regateador",posesion:"Especialista en tener el balón",centros:"Especialista en centros",aguerrido:"Defensa aguerrido",ladron:"Ladrón de balón",balon:"Especialista a balón parado",parapenaltis:"Portero parapenaltis",cabeceador:"Cabeceador",rapido:"Rápido",killer:"Killer del área",motor:"Motor",lider:"Líder",provocador:"Provocador",penaltis:"Especialista en penaltis",sangrefria:"Sangre fría"};
-const ESP_SHORT={regate:"Regates",posesion:"Posesión",centros:"Centros",aguerrido:"Aguerrido",ladron:"Robo",balon:"Balón parado",parapenaltis:"Parapenaltis",cabeceador:"Cabeceador",rapido:"Rápido",killer:"Killer",motor:"Motor",lider:"Líder",provocador:"Provocador",penaltis:"Penaltis",sangrefria:"Sangre fría"};
-function mkEsp(pos){
-  if(Math.random()>0.18)return null; // la mayoría no tiene especialidad
+const ESP={regate:"Regateador",posesion:"Especialista en tener el balón",centros:"Especialista en centros",aguerrido:"Defensa aguerrido",ladron:"Ladrón de balón",balon:"Especialista a balón parado",parapenaltis:"Portero parapenaltis",cabeceador:"Cabeceador",rapido:"Rápido",killer:"Killer del área",motor:"Motor",lider:"Líder",provocador:"Provocador",penaltis:"Especialista en penaltis",sangrefria:"Sangre fría",muro:"Muro (central aéreo)",extremo:"Extremo desequilibrante",recuperador:"Recuperador",cerrojo:"Portero seguro"};
+const ESP_SHORT={regate:"Regates",posesion:"Posesión",centros:"Centros",aguerrido:"Aguerrido",ladron:"Robo",balon:"Balón parado",parapenaltis:"Parapenaltis",cabeceador:"Cabeceador",rapido:"Rápido",killer:"Killer",motor:"Motor",lider:"Líder",provocador:"Provocador",penaltis:"Penaltis",sangrefria:"Sangre fría",muro:"Muro",extremo:"Extremo",recuperador:"Recuperador",cerrojo:"Portero seguro"};
+function mkEsp(pos,force){
+  if(!force&&Math.random()>0.18)return null; // la mayoría no tiene especialidad (los cracks la traen siempre)
   const pools={
-    GK:[["parapenaltis",0.55],["lider",0.7],["motor",0.82],["sangrefria",0.93],["balon",1]],
-    DF:[["aguerrido",0.28],["ladron",0.46],["provocador",0.6],["cabeceador",0.72],["lider",0.8],["rapido",0.88],["balon",0.94],["motor",0.98],["sangrefria",1]],
-    MF:[["regate",0.2],["posesion",0.36],["centros",0.5],["ladron",0.6],["balon",0.7],["lider",0.78],["motor",0.85],["rapido",0.91],["penaltis",0.96],["sangrefria",1]],
-    FW:[["regate",0.22],["killer",0.4],["cabeceador",0.54],["centros",0.66],["balon",0.74],["rapido",0.84],["penaltis",0.92],["sangrefria",0.98],["motor",1]],
+    GK:[["parapenaltis",0.42],["cerrojo",0.6],["lider",0.72],["motor",0.82],["sangrefria",0.92],["balon",1]],
+    DF:[["aguerrido",0.22],["muro",0.38],["ladron",0.52],["provocador",0.63],["cabeceador",0.72],["lider",0.79],["rapido",0.87],["balon",0.93],["motor",0.98],["sangrefria",1]],
+    MF:[["regate",0.16],["posesion",0.3],["recuperador",0.42],["centros",0.53],["ladron",0.61],["extremo",0.7],["balon",0.78],["lider",0.84],["motor",0.9],["rapido",0.95],["penaltis",0.98],["sangrefria",1]],
+    FW:[["regate",0.2],["killer",0.36],["cabeceador",0.5],["extremo",0.62],["centros",0.72],["balon",0.79],["rapido",0.88],["penaltis",0.94],["sangrefria",0.98],["motor",1]],
   };
   const r=Math.random();for(const [k,acc] of pools[pos])if(r<acc)return k;
   return null;
@@ -404,6 +404,10 @@ function espSectorMult(p,slot,big){ // efectos que suben la fuerza de sector
   if(e==="rapido"&&atk)m*=1.05;
   if(e==="motor")m*=1.04; // rinde constante todo el partido
   if(e==="sangrefria"&&big)m*=1.09; // templanza en partidos importantes (copa/supercopa)
+  if(e==="muro"&&def)m*=1.10; // central aéreo: domina el juego aéreo defensivo
+  if(e==="recuperador"&&slot==="MF")m*=1.10; // pulmón: recupera en el centro del campo
+  if(e==="cerrojo"&&slot==="GK")m*=1.10; // portero seguro: encaja menos en juego abierto
+  if(e==="extremo"&&atk)m*=1.08; // extremo desequilibrante por banda
   return m;
 }
 function teamHasEsp(team,e){return team.players.some(p=>p.esp===e);}
@@ -461,7 +465,7 @@ function genProspect(baseStr,pos,crack){
   let rating,potencial;
   if(crack){ rating=clampR(baseStr-12+gauss()*3); potencial=clampR(94+rnd(6)); } // crack de 5 estrellas (techo 94-99)
   else{ rating=clampR(baseStr-16+gauss()*4); potencial=clampR(rating+14+rnd(26)); } // el techo es la apuesta
-  const esp=mkEsp(pos)||(crack&&mkEsp(pos))||(crack&&mkEsp(pos))||null; // los cracks tienen más probabilidad de traer especialidad
+  const esp=crack?mkEsp(pos,true):mkEsp(pos); // los cracks SIEMPRE traen una especialidad
   return {id:pid(),name:newName(),pos,rating,potencial,edad,goles:0,crack:!!crack,exp:initExp(edad),arrivedTemp:S?S.temporada:1,bias:mkBias(),esp};
 }
 function regen(pos,baseStr){
@@ -563,17 +567,18 @@ function simMatch(homeId,awayId,homeXi,awayXi,homeForm,awayForm,big){
 }
 function pickW(arr,wf){const w=arr.map(wf);const tot=w.reduce((a,b)=>a+b,0);if(tot<=0)return arr[rnd(arr.length)];let r=Math.random()*tot;for(let i=0;i<arr.length;i++){r-=w[i];if(r<=0)return arr[i];}return arr[arr.length-1];}
 function scorer(xi){return pickW(xi,p=>Math.pow(sk(p,"ano",true),2)*(p.pos==="FW"?1.6:p.pos==="MF"?1:p.pos==="DF"?0.35:0.05)*(p.esp==="killer"?2.2:1));} // marca según anotación (el killer del área remata todo)
-function assister(xi,scId){const cand=xi.filter(p=>p.id!==scId);if(!cand.length)return null;return pickW(cand,p=>Math.pow(sk(p,"pas",true),2)*(p.pos==="MF"?1.4:p.pos==="FW"?1:p.pos==="DF"?0.7:0.1)*(p.esp==="centros"?1.6:1)).id;} // asiste según pases (los de centros, más)
+function assister(xi,scId){const cand=xi.filter(p=>p.id!==scId);if(!cand.length)return null;return pickW(cand,p=>Math.pow(sk(p,"pas",true),2)*(p.pos==="MF"?1.4:p.pos==="FW"?1:p.pos==="DF"?0.7:0.1)*(p.esp==="centros"?1.6:p.esp==="extremo"?1.5:1)).id;} // asiste según pases (centros y extremos, más)
 function bestBalon(xi){const b=xi.filter(p=>p.esp==="balon");return b.length?b.sort((a,c)=>sk(c,"tl",true)-sk(a,"tl",true))[0]:null;}
 function makeEvents(H,hXi,gh,A,aXi,ga){
-  const one=(team,xi)=>{
+  const one=(team,xi,oppXi)=>{
     const bm=bestBalon(xi);
     const pen=xi.filter(p=>p.esp==="penaltis").sort((a,b)=>sk(b,"tl",true)-sk(a,"tl",true));
     const cab=xi.filter(p=>p.esp==="cabeceador").sort((a,b)=>sk(b,"ano",true)-sk(a,"ano",true));
+    const oppMuro=oppXi.some(p=>p.esp==="muro"); // un central aéreo rival tapa los remates de cabeza
     const setPiece=Math.random()<((bm||pen.length)?0.30:0.16); // gol de estrategia (falta/penalti/córner)
     if(setPiece){
       const taker=pen[0]||bm||pickW(xi,p=>Math.pow(sk(p,"tl",true),2)); // lanzador (penaltis > balón parado)
-      if(cab.length&&cab[0].id!==taker.id&&Math.random()<0.5){ // rematador de cabeza a la salida del córner/falta
+      if(cab.length&&cab[0].id!==taker.id&&Math.random()<(oppMuro?0.28:0.5)){ // rematador de cabeza a la salida del córner/falta
         return {min:1+rnd(93),team:team.id,who:cab[0].id,assist:taker.id,sp:true};
       }
       return {min:1+rnd(93),team:team.id,who:taker.id,assist:null,sp:true};
@@ -582,8 +587,8 @@ function makeEvents(H,hXi,gh,A,aXi,ga){
     return {min:1+rnd(93),team:team.id,who:sc.id,assist:assister(xi,sc.id),sp:false};
   };
   const evs=[];
-  for(let i=0;i<gh;i++)evs.push(one(H,hXi));
-  for(let i=0;i<ga;i++)evs.push(one(A,aXi));
+  for(let i=0;i<gh;i++)evs.push(one(H,hXi,aXi));
+  for(let i=0;i<ga;i++)evs.push(one(A,aXi,hXi));
   return evs.sort((a,b)=>a.min-b.min);
 }
 function applyResult(r){
@@ -633,7 +638,7 @@ function academyTrain(){
   // al JUGAR entrenan de verdad, así que suben rápido (multiplicadores por edad incluidos)
   S.cantera.forEach(p=>{ p.rating=clampR(p.rating+trainGain(p,1,1.2)); });
 }
-const CANTERA_CAP=20;
+const CANTERA_CAP=40;
 const INVEST_BONUS={Baja:-6,Media:0,Alta:8}; // inversión en cantera: sube/baja el nivel de los juveniles
 function canteraStr(){return clampR(S.teams[S.user].str+INVEST_BONUS[S.canteraInvest||"Media"]);}
 function buildYouthPlan(){
@@ -922,7 +927,7 @@ function simJornada(){
   const pos=S.youthPlan[w];
   let nuevos=[],crackName=null;
   if(pos){
-    const isCrack=((w+1)%10===0);
+    const isCrack=((w+1)%8===0); // crack cada 8 semanas -> 4 por temporada (sem 8,16,24,32), todos con especialidad
     let cpos=pos;
     if(isCrack){ // reparto 9/35/35/21, pero garantía de 1 portero cada 11 cracks
       const since=S.crackSinceGK||0;
