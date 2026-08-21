@@ -140,6 +140,7 @@
   .badge-prom{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:9px;letter-spacing:.08em;background:color-mix(in srgb,var(--gold) 26%,transparent);color:var(--gold-ink);padding:1px 6px;border-radius:6px;vertical-align:middle}
   .badge-crack{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:9px;letter-spacing:.08em;background:color-mix(in srgb,#a06bff 32%,transparent);color:#c9a8ff;padding:1px 6px;border-radius:6px;vertical-align:middle}
   .badge-cap{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:9px;letter-spacing:.08em;background:color-mix(in srgb,var(--gold) 34%,transparent);color:var(--gold-ink);padding:1px 6px;border-radius:6px;vertical-align:middle}
+  .badge-taker{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:9px;letter-spacing:.08em;background:color-mix(in srgb,var(--accent) 30%,transparent);color:var(--accent);padding:1px 6px;border-radius:6px;vertical-align:middle}
   :root[data-theme="light"] .badge-crack{color:#6a2fce}
   @media(prefers-color-scheme:light){:root:not([data-theme="dark"]) .badge-crack{color:#6a2fce}}
   .trend-up{color:var(--good);font-weight:700}
@@ -517,9 +518,9 @@ function newGame(userTeamId){
   usados=new Set();PID=0;
   const teams={};
   ALLTEAMS.forEach(t=>{
-    teams[t.id]={...t,players:genSquad(t.str),form:"4-4-2",captain:null,
+    teams[t.id]={...t,players:genSquad(t.str),form:"4-4-2",captain:null,taker:null,
       pj:0,g:0,e:0,p:0,gf:0,gc:0,pts:0,hist:[],palmares:{liga1:0,liga2:0,copa:0,copaliga:0,super:0}};
-    ensureCaptain(teams[t.id]);
+    ensureCaptain(teams[t.id]);ensureTaker(teams[t.id]);
   });
   const cantera=[];for(let i=0;i<11;i++){const pr=genProspect(teams[userTeamId].str);pr.arrivedTemp=1;cantera.push(pr);} // 11 juveniles al inicio (equipo de filial)
   const xi0=bestXI(teams[userTeamId].players,"4-4-2");
@@ -576,41 +577,62 @@ function decideTie(a,b,ga,gb){
   return {winner:pa>pb?a:b,mode:"penaltis",ga,gb,pa,pb};
 }
 function penEdge(id){let e=0;if(teamHasEsp(S.teams[id],"penaltis"))e+=0.05;if(teamHasEsp(S.teams[id],"sangrefria"))e+=0.03;e+=0.04*captainQ(S.teams[id]);return e;} // ventaja en la tanda (incluye el temple del capitán)
+/* ---------- lanzador de faltas/penaltis: rol asignable (puede ser el capitán) ---------- */
+function bestKeeper(xi){const gk=xi.filter(p=>p.pos==="GK");return (gk.length?gk:xi).slice().sort((a,b)=>sk(b,"por",true)-sk(a,"por",true))[0];}
+function takerScore(p){return sk(p,"tl",true)+(p.esp==="balon"?4:0)+(p.esp==="penaltis"?4:0);} // mejor tirador (faltas+penaltis)
+function ensureTaker(team){ if(team.taker&&team.players.some(p=>p.id===team.taker))return; team.taker=team.players.length?team.players.slice().sort((a,b)=>takerScore(b)-takerScore(a))[0].id:null; }
+function takerOf(team){ensureTaker(team);return team.players.find(p=>p.id===team.taker)||null;}
+function setTaker(id){const t=S.teams[S.user];if(t.players.some(p=>p.id===id)){t.taker=id;saveGame();render();}}
+function pickTakerFor(team,xi,kind){ // el lanzador designado si juega; si no, el mejor del once para ese tipo
+  const des=team.taker&&xi.find(p=>p.id===team.taker);
+  if(des)return des;
+  const key=kind==="penalti"?"penaltis":"balon";
+  return xi.slice().sort((a,b)=>(sk(b,"tl",true)+(b.esp===key?6:0))-(sk(a,"tl",true)+(a.esp===key?6:0)))[0];
+}
+// Balón parado resuelto como duelo: TL del lanzador contra la portería del meta (parapenaltis en los penaltis)
+function setPieces(team,xi,oppXi){
+  const gk=bestKeeper(oppXi), kpr=gk?sk(gk,"por",true):8, para=gk&&gk.esp==="parapenaltis";
+  const oppMuro=oppXi.some(p=>p.esp==="muro");
+  const events=[];let goals=0;
+  const nFalta=poisson(0.8), nPen=(Math.random()<0.15)?1:0; // faltas peligrosas + (a veces) un penalti
+  for(let i=0;i<nFalta;i++){
+    const tk=pickTakerFor(team,xi,"falta");if(!tk)break;
+    const p=Math.max(0.02,Math.min(0.28, 0.05+sk(tk,"tl",true)*0.007-kpr*0.004+(tk.esp==="balon"?0.03:0)));
+    if(Math.random()<p){ goals++; let who=tk.id,assist=null;
+      const cab=xi.filter(p2=>p2.esp==="cabeceador"&&p2.id!==tk.id).sort((a,b)=>sk(b,"ano",true)-sk(a,"ano",true))[0]; // remate de cabeza a la salida
+      if(cab&&Math.random()<(oppMuro?0.28:0.5)){who=cab.id;assist=tk.id;}
+      events.push({min:1+rnd(93),team:team.id,who,assist,sp:"falta"});
+    }
+  }
+  for(let i=0;i<nPen;i++){
+    const tk=pickTakerFor(team,xi,"penalti");if(!tk)break;
+    const p=Math.max(0.5,Math.min(0.92, 0.72+sk(tk,"tl",true)*0.006-kpr*0.002-(para?0.12:0)+(tk.esp==="penaltis"?0.05:0)));
+    if(Math.random()<p){ goals++; events.push({min:1+rnd(93),team:team.id,who:tk.id,assist:null,sp:"penalti"}); }
+  }
+  return {goals,events};
+}
 function simMatch(homeId,awayId,homeXi,awayXi,homeForm,awayForm,big){
   const H=S.teams[homeId],A=S.teams[awayId];
   const hr=xiRating(H,homeXi,homeForm,big),ar=xiRating(A,awayXi,awayForm,big);
-  const HOME=3.2;
+  const HOME=3.2, OP=0.84; // parte del gol llega por balón parado; el juego abierto se escala para no descuadrar el total
   const dh=(hr.attR-ar.defR)+HOME, da=(ar.attR-hr.defR)-HOME*0.5;
-  const xgH=Math.max(0.18,Math.min(4.4,1.35+dh*0.055));
-  const xgA=Math.max(0.14,Math.min(4.0,1.15+da*0.055));
-  const gh=poisson(xgH),ga=poisson(xgA);
-  return {homeId,awayId,gh,ga,events:makeEvents(H,hr.xi,gh,A,ar.xi,ga)};
+  const xgH=Math.max(0.18,Math.min(4.4,1.35+dh*0.055))*OP;
+  const xgA=Math.max(0.14,Math.min(4.0,1.15+da*0.055))*OP;
+  const ghOpen=poisson(xgH),gaOpen=poisson(xgA);
+  const spH=setPieces(H,hr.xi,ar.xi), spA=setPieces(A,ar.xi,hr.xi); // faltas/penaltis, lanzador vs portero rival
+  const evs=makeEvents(H,hr.xi,ghOpen,A,ar.xi,gaOpen).concat(spH.events,spA.events).sort((a,b)=>a.min-b.min);
+  return {homeId,awayId,gh:ghOpen+spH.goals,ga:gaOpen+spA.goals,events:evs};
 }
 function pickW(arr,wf){const w=arr.map(wf);const tot=w.reduce((a,b)=>a+b,0);if(tot<=0)return arr[rnd(arr.length)];let r=Math.random()*tot;for(let i=0;i<arr.length;i++){r-=w[i];if(r<=0)return arr[i];}return arr[arr.length-1];}
 function scorer(xi){return pickW(xi,p=>Math.pow(sk(p,"ano",true),2)*(p.pos==="FW"?1.6:p.pos==="MF"?1:p.pos==="DF"?0.35:0.05)*(p.esp==="killer"?2.2:1));} // marca según anotación (el killer del área remata todo)
 function assister(xi,scId){const cand=xi.filter(p=>p.id!==scId);if(!cand.length)return null;return pickW(cand,p=>Math.pow(sk(p,"pas",true),2)*(p.pos==="MF"?1.4:p.pos==="FW"?1:p.pos==="DF"?0.7:0.1)*(p.esp==="centros"?1.6:p.esp==="extremo"?1.5:1)).id;} // asiste según pases (centros y extremos, más)
 function bestBalon(xi){const b=xi.filter(p=>p.esp==="balon");return b.length?b.sort((a,c)=>sk(c,"tl",true)-sk(a,"tl",true))[0]:null;}
-function makeEvents(H,hXi,gh,A,aXi,ga){
-  const one=(team,xi,oppXi)=>{
-    const bm=bestBalon(xi);
-    const pen=xi.filter(p=>p.esp==="penaltis").sort((a,b)=>sk(b,"tl",true)-sk(a,"tl",true));
-    const cab=xi.filter(p=>p.esp==="cabeceador").sort((a,b)=>sk(b,"ano",true)-sk(a,"ano",true));
-    const oppMuro=oppXi.some(p=>p.esp==="muro"); // un central aéreo rival tapa los remates de cabeza
-    const setPiece=Math.random()<((bm||pen.length)?0.30:0.16); // gol de estrategia (falta/penalti/córner)
-    if(setPiece){
-      const taker=pen[0]||bm||pickW(xi,p=>Math.pow(sk(p,"tl",true),2)); // lanzador (penaltis > balón parado)
-      if(cab.length&&cab[0].id!==taker.id&&Math.random()<(oppMuro?0.28:0.5)){ // rematador de cabeza a la salida del córner/falta
-        return {min:1+rnd(93),team:team.id,who:cab[0].id,assist:taker.id,sp:true};
-      }
-      return {min:1+rnd(93),team:team.id,who:taker.id,assist:null,sp:true};
-    }
-    const sc=scorer(xi);
-    return {min:1+rnd(93),team:team.id,who:sc.id,assist:assister(xi,sc.id),sp:false};
-  };
+function makeEvents(H,hXi,gh,A,aXi,ga){ // solo goles de juego abierto (el balón parado lo genera setPieces)
+  const one=(team,xi)=>{const sc=scorer(xi);return {min:1+rnd(93),team:team.id,who:sc.id,assist:assister(xi,sc.id),sp:false};};
   const evs=[];
-  for(let i=0;i<gh;i++)evs.push(one(H,hXi,aXi));
-  for(let i=0;i<ga;i++)evs.push(one(A,aXi,hXi));
-  return evs.sort((a,b)=>a.min-b.min);
+  for(let i=0;i<gh;i++)evs.push(one(H,hXi));
+  for(let i=0;i<ga;i++)evs.push(one(A,aXi));
+  return evs;
 }
 function applyResult(r){
   const H=S.teams[r.homeId],A=S.teams[r.awayId];
@@ -1145,14 +1167,15 @@ function nextMatchHtml(){
 function bindNav(){document.querySelectorAll("[data-screen]").forEach(b=>b.onclick=()=>{pendingRelease=null;pendingReleaseY=null;releaseMsg="";swapSel=null;swapMsg="";S.screen=b.dataset.screen;render();});}
 
 function capBadge(p){return S.teams[S.user].captain===p.id?' <span class="badge-cap" title="Capitán del equipo">© CAP</span>':'';}
+function takerBadge(p){return S.teams[S.user].taker===p.id?' <span class="badge-taker" title="Lanzador de faltas y penaltis">🎯 TL</span>':'';}
 function playerRow(p){
-  const isCap=S.teams[S.user].captain===p.id;
+  const isCap=S.teams[S.user].captain===p.id, isTk=S.teams[S.user].taker===p.id;
   let action;
   if(pendingRelease===p.id)action=`<div style="display:flex;gap:6px;justify-content:flex-end"><button class="confbtn yes" data-relyes="${p.id}">Despedir</button><button class="confbtn" data-relno="1">No</button></div>`;
-  else action=`<div style="display:flex;gap:6px;justify-content:flex-end">${isCap?`<span class="relbtn" style="opacity:.55;cursor:default" title="Ya es el capitán">©</span>`:`<button class="relbtn" data-cap="${p.id}" title="Nombrar capitán a ${p.name}" aria-label="Nombrar capitán">©</button>`}<button class="relbtn" data-rel="${p.id}" title="Despedir a ${p.name}" aria-label="Despedir">✕</button></div>`;
+  else action=`<div style="display:flex;gap:6px;justify-content:flex-end">${isTk?`<span class="relbtn" style="opacity:.55;cursor:default" title="Ya es el lanzador">🎯</span>`:`<button class="relbtn" data-taker="${p.id}" title="Nombrar lanzador de faltas/penaltis a ${p.name}" aria-label="Nombrar lanzador">🎯</button>`}${isCap?`<span class="relbtn" style="opacity:.55;cursor:default" title="Ya es el capitán">©</span>`:`<button class="relbtn" data-cap="${p.id}" title="Nombrar capitán a ${p.name}" aria-label="Nombrar capitán">©</button>`}<button class="relbtn" data-rel="${p.id}" title="Despedir a ${p.name}" aria-label="Despedir">✕</button></div>`;
   return `<tr>
     <td><span class="pill p-${p.pos}">${p.pos}</span></td>
-    <td class="nm" style="font-weight:600">${p.name}${capBadge(p)} ${isPromesa(p)?'<span class="badge-prom">PROMESA</span>':''}${p.esp?" "+espBadge(p):""}</td>
+    <td class="nm" style="font-weight:600">${p.name}${capBadge(p)}${takerBadge(p)} ${isPromesa(p)?'<span class="badge-prom">PROMESA</span>':''}${p.esp?" "+espBadge(p):""}</td>
     <td class="num">${p.edad}</td>
     <td style="text-align:center"><span class="rating" style="${skColor(nivel(p))}" title="Nivel en campo (media de habilidades + experiencia)">${nivel(p)}</span></td>
     ${skillCells(p)}
@@ -1174,7 +1197,7 @@ function viewSquad(){
       <span class="pill" style="background:var(--surface-3);color:var(--muted)">Nivel medio ${avg}/20</span>
       <span class="pill" style="background:var(--surface-3);color:var(--muted)">${players.length} jugadores</span>
     </div>
-    <p class="sub">Habilidades <b>1-20</b>: POR portería · DEF defensa · JUG jugadas · PAS pases (asistencias) · ANO anotación · TL tiros libres. <b>Nivel</b> = en campo (habilidades + experiencia). ✦ = especialidad · © = capitán (pulsa © para nombrarlo). Las estrellas son el <b>potencial</b>.</p>
+    <p class="sub">Habilidades <b>1-20</b>: POR portería · DEF defensa · JUG jugadas · PAS pases (asistencias) · ANO anotación · TL tiros libres. <b>Nivel</b> = en campo (habilidades + experiencia). ✦ = especialidad · © = capitán · 🎯 = lanzador de faltas/penaltis (pulsa el icono para asignarlo). Las estrellas son el <b>potencial</b>.</p>
     ${msg}
     <div class="card"><div class="tbl-scroll"><table>
       <thead><tr><th>Pos</th><th>Jugador</th><th class="num">Edad</th><th style="text-align:center">Nivel</th>${skHead}<th>Pot.</th><th class="num">Gol</th><th></th></tr></thead>
@@ -1182,6 +1205,7 @@ function viewSquad(){
 }
 function bindSquad(){
   document.querySelectorAll("[data-cap]").forEach(b=>b.onclick=()=>setCaptain(b.dataset.cap));
+  document.querySelectorAll("[data-taker]").forEach(b=>b.onclick=()=>setTaker(b.dataset.taker));
   document.querySelectorAll("[data-rel]").forEach(b=>b.onclick=()=>{pendingRelease=b.dataset.rel;releaseMsg="";render();});
   document.querySelectorAll("[data-relyes]").forEach(b=>b.onclick=()=>release(b.dataset.relyes));
   document.querySelectorAll("[data-relno]").forEach(b=>b.onclick=()=>{pendingRelease=null;render();});
@@ -1196,7 +1220,7 @@ function luRow(p,slot){ // slot = puesto del hueco (para marcar fuera de posici�
   const fp=(slot&&slot!==p.pos)?` <span class="badge-prom" style="background:color-mix(in srgb,var(--bad) 20%,transparent);color:var(--bad)" title="Fuera de su posición: rinde peor">⚠ ${slot}</span>`:"";
   return `<div class="lineup-slot" data-swap="${p.id}" style="${st}">
     <span class="slot-lab p-${p.pos}" style="border-radius:6px;padding:2px 0">${p.pos}</span>
-    <span style="flex:1;font-weight:600;font-size:14px">${p.name}${capBadge(p)}${crk}${prom}${p.esp?" "+espBadge(p):""}${fp} <span class="muted" style="font-weight:400">${p.edad}a</span></span>
+    <span style="flex:1;font-weight:600;font-size:14px">${p.name}${capBadge(p)}${takerBadge(p)}${crk}${prom}${p.esp?" "+espBadge(p):""}${fp} <span class="muted" style="font-weight:400">${p.edad}a</span></span>
     <span class="slot-meta"><span class="rating" style="${skColor(nivel(p))};width:auto;padding:0 7px" title="Nivel en campo">${nivel(p)}</span>${potStars(p.potencial)}</span>
   </div>`;
 }
@@ -1216,6 +1240,8 @@ function viewLineup(){
   const msg=swapMsg?`<div class="devnote" style="background:color-mix(in srgb,var(--bad) 10%,transparent);border-color:var(--bad)"><div style="font-size:13px">${swapMsg}</div></div>`:"";
   const cap=captainOf(t), capIn=cap&&lu.xi.includes(cap.id), capPct=cap?Math.round((captainBoost(t,lu.xi,false)-1)*100):0;
   const capNote=cap?`<div class="devnote" style="margin-bottom:12px;${capIn?"":"background:color-mix(in srgb,var(--bad) 10%,transparent);border-color:var(--bad)"}"><div style="font-size:13px">© <b>Capitán:</b> ${cap.name} · ${nivel(cap)}/20${cap.esp==="lider"?" · líder ✦":""}. ${capIn?`Tira del equipo <b>+${capPct}%</b> (más en partidos grandes y en penaltis). Cámbialo en <b>Plantilla</b>.`:`<b style="color:var(--bad)">No está en el once</b>: el equipo pierde su influencia. Alinéalo para aprovechar el brazalete.`}</div></div>`:"";
+  const tk=takerOf(t), tkIn=tk&&lu.xi.includes(tk.id);
+  const tkNote=tk?`<div class="devnote" style="margin-bottom:12px;${tkIn?"":"background:color-mix(in srgb,var(--bad) 10%,transparent);border-color:var(--bad)"}"><div style="font-size:13px">🎯 <b>Lanzador:</b> ${tk.name} · tiros libres ${sk(tk,"tl",true)}/20${tk.esp==="balon"?" · balón parado ✦":""}${tk.esp==="penaltis"?" · penaltis ✦":""}. ${tkIn?`Lanza faltas y penaltis: su <b>TL contra la portería del meta rival</b> decide si entra. Cámbialo en <b>Plantilla</b>.`:`<b style="color:var(--bad)">No está en el once</b>: lanzará el mejor disponible. Alinéalo si quieres que tire él.`}</div></div>`:"";
   return navHtml("lineup")+`
     <h2 class="sect-title">Alineación</h2>
     <p class="sub">Dos onces: <b>liga</b> y <b>entre semana</b> (copa/amistoso). Toca un jugador y luego otro para <b>intercambiarlos</b> (titular↔suplente o entre suplentes). Puedes poner a cualquiera en cualquier hueco, pero <b>fuera de su puesto rinde peor</b> (aviso ⚠). Solo entrenan los que juegan.</p>
@@ -1225,7 +1251,7 @@ function viewLineup(){
       <button class="btn ghostgold sm" id="autoBtn">Auto (mejor 11)</button>
       <span class="pill" style="background:var(--surface-3);color:var(--muted)">Nivel del 11: ${R(rating/5)}/20</span>
     </div>
-    ${msg}${capNote}
+    ${msg}${capNote}${tkNote}
     <div class="grid2">
       <div>
         <div class="sect-title" style="font-size:15px;color:var(--faint);margin:0 0 6px">Titulares (${form})</div>
@@ -1413,7 +1439,7 @@ function copaTieRow(t){
   else if(t.mode==="penaltis")tag=`<span class="muted" style="font-size:11px">penaltis ${t.pa}-${t.pb}</span>`;
   return `<div class="match ${you}"><div class="h"><span class="tn">${nA}</span>${crest(A,24)}</div><span class="sc" title="marcador de la eliminatoria">${sc}</span><div class="a">${crest(B,24)}<span class="tn">${nB}</span></div>${tag?`<div style="grid-column:1/-1;text-align:center;margin-top:4px">${tag}</div>`:""}</div>`;
 }
-function eventsHtml(events){return `<div class="events">${events.map(e=>{const T=S.teams[e.team];const pl=T.players.find(p=>p.id===e.who);const ap=e.assist?T.players.find(p=>p.id===e.assist):null;const tag=e.sp?' <span class="muted">(balón parado)</span>':(ap?` <span class="muted">· asist. ${ap.name}</span>`:'');return `<div class="ev"><span class="min">${e.min}'</span><span>⚽ ${pl?pl.name:"—"} <span class="muted">(${T.abbr})</span>${tag}</span></div>`;}).join("")}</div>`;}
+function eventsHtml(events){return `<div class="events">${events.map(e=>{const T=S.teams[e.team];const pl=T.players.find(p=>p.id===e.who);const ap=e.assist?T.players.find(p=>p.id===e.assist):null;const tag=e.sp?` <span class="muted">(${e.sp==="penalti"?"penalti":e.sp==="falta"?"falta":"balón parado"}${ap?", cabeza de "+ap.name:""})</span>`:(ap?` <span class="muted">· asist. ${ap.name}</span>`:'');return `<div class="ev"><span class="min">${e.min}'</span><span>⚽ ${pl?pl.name:"—"} <span class="muted">(${T.abbr})</span>${tag}</span></div>`;}).join("")}</div>`;}
 function cupCard(r,evUser){ // partido de copa en Resultados: marcador + ganador (negrita) + prórroga/penaltis + global si es a doble
   const H=S.teams[r.homeId],A=S.teams[r.awayId];const you=(r.homeId===S.user||r.awayId===S.user)?"you":"";
   const t=r.tie;let hn=H.short,an=A.short,foot="";
