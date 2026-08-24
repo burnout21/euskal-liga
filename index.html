@@ -536,6 +536,7 @@ function newGame(userTeamId){
     history:{},lastResults:null,lastDev:null,finished:false,screen:"squad",
   };
   ensureLineupRoles(S.lineup,teams[userTeamId].players);ensureLineupRoles(S.lineupMid,teams[userTeamId].players);
+  Object.values(S.teams).forEach(initEco);
 }
 
 /* ---------- simulación ---------- */
@@ -939,6 +940,61 @@ function simMidweek(w){
 }
 
 /* ---------- ciclo de semana / temporada (32 semanas) ---------- */
+/* ---------- economía: caja, salarios, ingresos y números rojos ---------- */
+const STD_SQUAD=24, SELL_FRACTION=0.7, WAGE_RATE=0.18, SEASON_MARGIN=1.25, ECO_GRACE=16, ECO_PENALTY=3;
+function ageValF(e){return e<=20?0.9:e<=27?1:e===28?0.85:e===29?0.75:e===30?0.6:e===31?0.45:e===32?0.3:0.18;}
+function playerValue(p){return Math.round(Math.pow(nivel(p),2.7)*900*ageValF(p.edad));} // valor de mercado aprox (€)
+function salaryOf(p){return Math.round(playerValue(p)*WAGE_RATE);}                        // salario anual
+function seasonWages(team){return team.players.reduce((s,p)=>s+salaryOf(p),0);}
+function weeklyWages(team){return Math.round(seasonWages(team)/NWEEKS);}
+function pseudoValue(n){return Math.round(Math.pow(n,2.7)*900);}
+function incomeBaseSeason(team){const tn=clampS(Math.round(team.str/5));return Math.round(STD_SQUAD*pseudoValue(tn)*WAGE_RATE*SEASON_MARGIN);} // ingreso "natural" del club (por división/fuerza)
+function debtLimit(team){return -Math.round(incomeBaseSeason(team)*0.75);}   // deuda máxima permitida (negativa)
+function tvWeekly(team){return Math.round(incomeBaseSeason(team)*0.30/NWEEKS);}
+function gateHome(team){return Math.round(incomeBaseSeason(team)*0.55/14);}   // taquilla por partido de liga en casa (14 al año)
+function fmtMoney(n){const a=Math.abs(Math.round(n));const s=n<0?"−":"";if(a>=1e6)return s+(a/1e6).toFixed(a>=1e7?0:1).replace(".",",")+" M€";if(a>=1e3)return s+Math.round(a/1e3)+" k€";return s+a+" €";}
+function canSell(team,p){const posN=team.players.filter(x=>x.pos===p.pos).length;return team.players.length>SQUAD_MIN&&posN>MIN_POS[p.pos];}
+function initEco(team){team.caja=Math.round(incomeBaseSeason(team)*0.5);team.redWeeks=0;team.ecoIn=0;team.ecoOut=0;}
+function ensureEco(team){if(typeof team.caja!=="number")initEco(team);if(typeof team.redWeeks!=="number")team.redWeeks=0;if(typeof team.ecoIn!=="number")team.ecoIn=0;if(typeof team.ecoOut!=="number")team.ecoOut=0;}
+// procesa la semana económica de todos los clubes; devuelve el informe del equipo del usuario
+function economyTick(homeSet){
+  let userReport=null;
+  Object.values(S.teams).forEach(team=>{
+    ensureEco(team);
+    const income=tvWeekly(team)+(homeSet.has(team.id)?gateHome(team):0);
+    const expense=weeklyWages(team);
+    team.caja+=income-expense; team.ecoIn+=income; team.ecoOut+=expense;
+    team.redWeeks=team.caja<0?team.redWeeks+1:0;
+    // ¿toca actuar? deuda por debajo del tope, o demasiadas semanas en rojo
+    if(team.caja<debtLimit(team)||team.redWeeks>ECO_GRACE){
+      const sold=[];
+      // venta forzosa: vende a los más valiosos respetando mínimos de plantilla
+      while(team.caja<0){
+        const cand=team.players.filter(p=>canSell(team,p)).sort((a,b)=>playerValue(b)-playerValue(a))[0];
+        if(!cand)break;
+        team.caja+=Math.round(playerValue(cand)*SELL_FRACTION);
+        team.players=team.players.filter(p=>p.id!==cand.id);
+        sold.push(cand.name);
+      }
+      let penalty=false;
+      if(team.caja<0){ team.pts=Math.max(0,team.pts-ECO_PENALTY); team.caja=Math.max(team.caja,debtLimit(team)); penalty=true; } // no se pudo sanear: sanción y tope de deuda
+      team.redWeeks=0; // nuevo periodo de gracia tras actuar
+      if(team.id===S.user){
+        if(S.lineup.xi.some(id=>!team.players.find(p=>p.id===id)))S.lineup.xi=bestXI(team.players,S.lineup.form);
+        if(S.lineupMid.xi.some(id=>!team.players.find(p=>p.id===id)))S.lineupMid.xi=bestXI(team.players,S.lineupMid.form);
+        ensureLineupRoles(S.lineup,team.players);ensureLineupRoles(S.lineupMid,team.players);
+        userReport={sold,penalty};
+      }
+    }
+  });
+  return userReport;
+}
+function seasonPrizes(){ // premios de fin de temporada por posición (por división)
+  for(let div=1;div<=NDIV;div++){
+    const st=standings(div),n=st.length;
+    st.forEach((t,i)=>{ensureEco(t);const posF=n>1?(1-i/(n-1))*0.8+0.2:1;t.caja+=Math.round(incomeBaseSeason(t)*0.15*posF);});
+  }
+}
 function simJornada(){
   if(S.finished)return;
   const w=S.jornada,lr=leagueRound(w),team=S.teams[S.user];
@@ -974,9 +1030,13 @@ function simJornada(){
     }
     const p=genProspect(canteraStr(),cpos,isCrack);nuevos=addYouths([p]);if(isCrack&&S.cantera.includes(p))crackName=p.name;
   }
+  // economía: cobros/pagos de la semana y control de números rojos (todos los clubes)
+  const homeSet=new Set();
+  if(lr>=0)for(let div=1;div<=NDIV;div++)for(const [h] of S.leagueCal[div][lr])homeSet.add(h);
+  const ecoRep=economyTick(homeSet);
   const ups=[];team.players.forEach(p=>{const a=nivel(p);if(a!==before[p.id])ups.push({name:p.name,pos:p.pos,from:before[p.id],to:a,up:a>before[p.id]});});
   const canteraUps=S.cantera.filter(p=>cBefore[p.id]!==undefined&&nivel(p)>cBefore[p.id]).map(p=>({name:p.name,pos:p.pos,from:cBefore[p.id],to:nivel(p)}));
-  S.lastDev={ups,nuevos,crack:crackName,canteraUps};
+  S.lastDev={ups,nuevos,crack:crackName,canteraUps,eco:ecoRep};
   S.lastResults={week:w,lr,results:res,weekendAmis,mid};
   if(lr>=0)S.history[lr]=res;
   S.jornada++;
@@ -1038,13 +1098,14 @@ function nuevaTemporada(){
   const champ1=standings(1)[0], champ2=standings(2)[0];
   champ1.palmares.liga1++; champ2.palmares.liga2++;
   S.winners.push({temp:S.temporada,liga1:champ1.id,liga2:champ2.id,copa:S.copaChamp,copaliga:S.copaLigaChamp,super:S.superChamp});
+  seasonPrizes(); // premios de fin de temporada según la clasificación final
   promoteRelegate();
   // envejecer y desarrollar
   Object.values(S.teams).forEach(t=>{
     const ai=t.id!==S.user;
     t.players.forEach(p=>{p.edad++;endSeasonDevelop(p);p.goles=0;p.asis=0;if(ai)p.exp=Math.min(400,(p.exp||0)+SEASON_EXP);}); // la IA gana experiencia por temporada
     maintainSquad(t);
-    Object.assign(t,{pj:0,g:0,e:0,p:0,gf:0,gc:0,pts:0,hist:[]});
+    Object.assign(t,{pj:0,g:0,e:0,p:0,gf:0,gc:0,pts:0,hist:[],redWeeks:0,ecoIn:0,ecoOut:0}); // la caja se conserva; se reinician los acumuladores
   });
   S.cantera.forEach(p=>{p.edad++;});
   S.cantera=S.cantera.filter(p=>p.edad<=20);
@@ -1088,7 +1149,7 @@ function render(){
   saveGame(); // autoguardado en el navegador tras cada acción
   renderHud();
   const r=document.getElementById("root");
-  const v={squad:viewSquad,lineup:viewLineup,training:viewTraining,cantera:viewCantera,table:viewTable,stats:viewStats,fixtures:viewFixtures,copa:viewCopa,results:viewResults,palmares:viewPalmares}[S.screen]||viewSquad;
+  const v={squad:viewSquad,lineup:viewLineup,training:viewTraining,cantera:viewCantera,eco:viewEconomia,table:viewTable,stats:viewStats,fixtures:viewFixtures,copa:viewCopa,results:viewResults,palmares:viewPalmares}[S.screen]||viewSquad;
   r.innerHTML=v();
   bindNav();
   if(S.screen==="squad")bindSquad();
@@ -1124,11 +1185,12 @@ function renderHud(){
     <div class="chip"><span class="lab">Semana</span><span class="val">${semTxt}</span></div>
     <div class="chip"><span class="lab">Pos</span><span class="val">${userPos()}º</span></div>
     <div class="chip"><span class="lab">Pts</span><span class="val">${you.pts}</span></div>
+    <div class="chip"><span class="lab">Caja</span><span class="val" style="${(you.caja||0)<0?"color:var(--bad)":""}">${fmtMoney(you.caja||0)}</span></div>
     <button class="btn primary" id="simBtn" ${S.finished?"disabled":""}>${S.finished?"Temporada terminada":"▶ Simular semana"}</button>`;
   const sb=document.getElementById("simBtn");if(sb)sb.onclick=()=>simJornada();
 }
 function navHtml(active){
-  const items=[["squad","Plantilla"],["lineup","Alineación"],["training","Entrenamiento"],["cantera","Cantera"],["table","Clasificación"],["stats","Estadísticas"],["fixtures","Calendario"],["copa","Copa"],["results","Resultados"],["palmares","Palmarés"]];
+  const items=[["squad","Plantilla"],["lineup","Alineación"],["training","Entrenamiento"],["cantera","Cantera"],["eco","Economía"],["table","Clasificación"],["stats","Estadísticas"],["fixtures","Calendario"],["copa","Copa"],["results","Resultados"],["palmares","Palmarés"]];
   const nav=`<div class="nav">${items.map(([k,l])=>`<button data-screen="${k}" class="${active===k?"active":""}">${l}</button>`).join("")}</div>`;
   return nav+nextMatchHtml();
 }
@@ -1482,6 +1544,48 @@ function viewStats(){
     </div>`;
 }
 function bindStats(){const s=document.getElementById("statsSel");if(s)s.onchange=()=>{statsDiv=+s.value;render();};}
+function viewEconomia(){
+  const t=S.teams[S.user];ensureEco(t);
+  const wages=seasonWages(t), wagesW=weeklyWages(t);
+  const inc=incomeBaseSeason(t), tvS=Math.round(inc*0.30), gateS=Math.round(inc*0.55), prizeEst=Math.round(inc*0.15*0.6);
+  const squadVal=t.players.reduce((s,p)=>s+playerValue(p),0);
+  const inRed=t.caja<0, dl=debtLimit(t);
+  const balSeason=(t.ecoIn||0)-(t.ecoOut||0);
+  const netWeek=tvWeekly(t)-wagesW; // balance semanal sin contar taquilla (la taquilla llega en jornadas en casa)
+  const earners=t.players.slice().sort((a,b)=>salaryOf(b)-salaryOf(a));
+  const stat=(lab,val,extra)=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:5px 0;border-bottom:1px solid var(--surface-3)"><span class="muted" style="font-size:13px">${lab}</span><span style="font-weight:700;${extra||""}">${val}</span></div>`;
+  const warn=inRed?`<div class="devnote" style="margin-bottom:14px;background:color-mix(in srgb,var(--bad) 12%,transparent);border-color:var(--bad)"><div class="dt" style="color:var(--bad)">⚠ En números rojos</div><div style="font-size:13px;margin-top:4px">Llevas <b>${t.redWeeks}</b> de <b>${ECO_GRACE}</b> semanas en rojo. Límite de deuda: <b>${fmtMoney(dl)}</b>. Si superas el límite o agotas las semanas, habrá <b>venta forzosa</b> de tus mejores jugadores y, si aun así no se sanea, <b>−${ECO_PENALTY} puntos</b>.</div></div>`:"";
+  const card=(title,body)=>`<div style="flex:1;min-width:260px"><div class="sect-title" style="font-size:15px;color:var(--faint);margin:0 0 6px">${title}</div><div class="card" style="padding:12px 14px">${body}</div></div>`;
+  const earnRows=earners.slice(0,12).map(p=>`<tr><td class="nm" style="font-weight:600">${p.name}</td><td><span class="pill p-${p.pos}">${p.pos}</span></td><td style="text-align:center">${nivel(p)}</td><td class="num">${fmtMoney(playerValue(p))}</td><td class="num">${fmtMoney(salaryOf(p))}</td></tr>`).join("");
+  return navHtml("eco")+`
+    <div class="selrow">
+      <h2 class="sect-title" style="margin:0">💰 Economía · ${t.short} · T${S.temporada}</h2>
+      <span class="pill" style="background:var(--surface-3);${inRed?"color:var(--bad)":"color:var(--muted)"}">Caja ${fmtMoney(t.caja)}</span>
+    </div>
+    <p class="sub">Cobras cada semana (TV/patrocinio + taquilla en casa) y pagas los salarios. Los premios llegan al final de temporada. Vigila no quedarte en rojo demasiado tiempo.</p>
+    ${warn}
+    <div style="display:flex;flex-wrap:wrap;gap:16px">
+      ${card("Caja y estado",
+        stat("Caja actual",fmtMoney(t.caja),inRed?"color:var(--bad)":"color:var(--grass)")+
+        stat("Límite de deuda",fmtMoney(dl))+
+        stat("Semanas en rojo",inRed?`${t.redWeeks}/${ECO_GRACE}`:"—")+
+        stat("Valor de la plantilla",fmtMoney(squadVal)))}
+      ${card("Ingresos (estimado temporada)",
+        stat("TV / patrocinio",fmtMoney(tvS))+
+        stat("Taquilla (14 partidos)",fmtMoney(gateS))+
+        stat("Premios por posición",fmtMoney(prizeEst)+" aprox.")+
+        stat("Acumulado esta temporada",fmtMoney(t.ecoIn||0),"color:var(--grass)"))}
+      ${card("Gastos",
+        stat("Masa salarial (año)",fmtMoney(wages))+
+        stat("Salarios (semana)",fmtMoney(wagesW))+
+        stat("Acumulado esta temporada",fmtMoney(t.ecoOut||0),"color:var(--bad)")+
+        stat("Balance temporada",fmtMoney(balSeason),balSeason<0?"color:var(--bad)":"color:var(--grass)"))}
+    </div>
+    <div class="sect-title" style="font-size:15px;color:var(--faint);margin:20px 0 6px">Salarios de la plantilla</div>
+    <div class="card"><div class="tbl-scroll"><table>
+      <thead><tr><th>Jugador</th><th>Pos</th><th style="text-align:center">Nivel</th><th class="num">Valor</th><th class="num">Salario/año</th></tr></thead>
+      <tbody>${earnRows}</tbody></table></div></div>`;
+}
 function viewFixtures(){
   const div=userDiv();const cal=S.leagueCal[div];
   const blocks=cal.map((day,j)=>{
@@ -1614,6 +1718,10 @@ function viewResults(){
       ${canteraUps.length?`<div style="margin-top:8px"><span class="muted" style="font-size:12px">🏋️ Cantera (juegan su liguilla y suben):</span><div class="devlist" style="margin-top:4px">${cu}</div></div>`:""}
       ${nuevos.length?`<div style="margin-top:8px;font-size:13px">${S.lastDev.crack?`💎 <b>¡CRACK de la cantera!</b> Ha aparecido <b>${S.lastDev.crack}</b> (potencial de estrella) — no lo dejes escapar, míralo en <b>Cantera</b>.`:`🌱 Nuevo juvenil en la cantera: <b>${nuevos.join(", ")}</b> — revísalo en <b>Cantera</b>.`}</div>`:""}</div>`;
   }
+  const eco=S.lastDev&&S.lastDev.eco;
+  if(eco&&(eco.sold.length||eco.penalty)){
+    devHtml+=`<div class="devnote" style="background:color-mix(in srgb,var(--bad) 12%,transparent);border-color:var(--bad)"><div class="dt" style="color:var(--bad)">⚠ Ajuste económico forzoso</div><div style="font-size:13px;margin-top:4px">${eco.sold.length?`Para tapar el agujero se ha vendido a: <b>${eco.sold.join(", ")}</b>. `:""}${eco.penalty?`No fue suficiente: <b>−${ECO_PENALTY} puntos</b> por impago. `:""}Revisa <b>Economía</b> y baja gastos.</div></div>`;
+  }
   const mCard=(r,sz,evUser)=>{
     const H=S.teams[r.homeId],A=S.teams[r.awayId];const you=(r.homeId===S.user||r.awayId===S.user)?"you":"";
     const ev=(evUser&&r.events&&r.events.length)?eventsHtml(r.events):"";
@@ -1666,6 +1774,7 @@ function restoreRuntime(){ // tras cargar: recomponer contadores de ids/nombres 
   PID=mx+1;
   if(S.lineup)ensureLineupRoles(S.lineup,S.teams[S.user].players); // saves antiguos: asignar capitán/lanzador por alineación
   if(S.lineupMid)ensureLineupRoles(S.lineupMid,S.teams[S.user].players);
+  Object.values(S.teams).forEach(ensureEco); // saves antiguos: inicializar economía
   lineupTab="liga";tableDiv=null;pendingRelease=null;pendingReleaseY=null;releaseMsg="";
 }
 function exportSave(){
