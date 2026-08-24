@@ -1160,46 +1160,67 @@ function nextMatchHtml(){
     <div class="nm-lab" style="margin-top:8px">Entre semana: <span style="color:var(--gold-ink)">${midLabel(S.jornada)}</span></div>
   </div>`;
 }
-function bindNav(){document.querySelectorAll("[data-screen]").forEach(b=>b.onclick=()=>{pendingRelease=null;pendingReleaseY=null;releaseMsg="";swapSel=null;swapMsg="";S.screen=b.dataset.screen;render();});}
+function bindNav(){document.querySelectorAll("[data-screen]").forEach(b=>b.onclick=()=>{pendingRelease=null;pendingReleaseY=null;releaseMsg="";swapSel=null;swapMsg="";browseTeam=null;S.screen=b.dataset.screen;render();});}
 
 function capBadge(p,lu){return lu&&lu.captain===p.id?' <span class="badge-cap" title="Capitán de esta alineación">© CAP</span>':'';}
 function takerBadge(p,lu){return lu&&lu.taker===p.id?' <span class="badge-taker" title="Lanzador de faltas/penaltis de esta alineación">🎯 TL</span>':'';}
-function playerRow(p){
-  let action;
-  if(pendingRelease===p.id)action=`<div style="display:flex;gap:6px;justify-content:flex-end"><button class="confbtn yes" data-relyes="${p.id}">Despedir</button><button class="confbtn" data-relno="1">No</button></div>`;
-  else action=`<button class="relbtn" data-rel="${p.id}" title="Despedir a ${p.name}" aria-label="Despedir">✕</button>`;
+function playerRow(p,own){
+  let actionTd="";
+  if(own){
+    let action;
+    if(pendingRelease===p.id)action=`<div style="display:flex;gap:6px;justify-content:flex-end"><button class="confbtn yes" data-relyes="${p.id}">Despedir</button><button class="confbtn" data-relno="1">No</button></div>`;
+    else action=`<button class="relbtn" data-rel="${p.id}" title="Despedir a ${p.name}" aria-label="Despedir">✕</button>`;
+    actionTd=`<td style="text-align:right">${action}</td>`;
+  }
+  const roles=own?`${capBadge(p,S.lineup)}${takerBadge(p,S.lineup)}`:"";
   return `<tr>
     <td><span class="pill p-${p.pos}">${p.pos}</span></td>
-    <td class="nm" style="font-weight:600">${p.name}${capBadge(p,S.lineup)}${takerBadge(p,S.lineup)} ${isPromesa(p)?'<span class="badge-prom">PROMESA</span>':''}${p.esp?" "+espBadge(p):""}</td>
+    <td class="nm" style="font-weight:600">${p.name}${roles} ${isPromesa(p)?'<span class="badge-prom">PROMESA</span>':''}${p.esp?" "+espBadge(p):""}</td>
     <td class="num">${p.edad}</td>
     <td style="text-align:center"><span class="rating" style="${skColor(nivel(p))}" title="Nivel en campo (media de habilidades + experiencia)">${nivel(p)}</span></td>
     <td class="num" title="Rodaje: ${expPct(p)}% · suma +${expLvlBonus(p).toFixed(1)} al nivel">${expBar(p)}</td>
     ${skillCells(p)}
     <td>${potStars(p.potencial)}</td>
     <td class="num">${p.goles||"·"}</td>
-    <td style="text-align:right">${action}</td>
+    ${actionTd}
   </tr>`;
 }
+let browseTeam=null; // null = mi equipo; si no, id del rival que estoy mirando
 function viewSquad(){
-  const t=S.teams[S.user];
+  const t=S.teams[(browseTeam&&S.teams[browseTeam])?browseTeam:S.user];
+  const own=t.id===S.user;
   const order={GK:0,DF:1,MF:2,FW:3};
   const players=t.players.slice().sort((a,b)=>order[a.pos]-order[b.pos]||eff(b)-eff(a));
   const avg=R(players.reduce((s,p)=>s+nivel(p),0)/players.length);
-  const msg=releaseMsg?`<div class="devnote" style="background:color-mix(in srgb,var(--bad) 10%,transparent);border-color:var(--bad)"><div class="dt" style="color:var(--bad)">Aviso</div><div style="font-size:13px;margin-top:4px">${releaseMsg}</div></div>`:"";
+  const msg=(own&&releaseMsg)?`<div class="devnote" style="background:color-mix(in srgb,var(--bad) 10%,transparent);border-color:var(--bad)"><div class="dt" style="color:var(--bad)">Aviso</div><div style="font-size:13px;margin-top:4px">${releaseMsg}</div></div>`:"";
   const skHead=SKILLS.map(s=>`<th class="num" title="${s[2]}">${s[1]}</th>`).join("");
+  const d=t.div;
+  const divOpts=[];for(let i=1;i<=NDIV;i++)divOpts.push(`<option value="${i}" ${i===d?"selected":""}>${DIV_NAMES[i]} Div.</option>`);
+  const teamsInDiv=Object.values(S.teams).filter(x=>x.div===d).sort((a,b)=>a.short.localeCompare(b.short));
+  const teamOpts=teamsInDiv.map(x=>`<option value="${x.id}" ${x.id===t.id?"selected":""}>${x.short}${x.id===S.user?" (tú)":""}</option>`).join("");
+  const roleLegend=own?" · © = capitán · 🎯 = lanzador (once de liga; se asignan en <b>Alineación</b>)":"";
   return navHtml("squad")+`
     <div class="selrow">
-      <h2 class="sect-title" style="margin:0">${crestInline(t)} Plantilla · ${t.short}</h2>
+      <h2 class="sect-title" style="margin:0">${crestInline(t)} Plantilla · ${t.short}${own?"":` <span class="badge-prom" style="background:var(--surface-3);color:var(--faint)">RIVAL · ${t.div}ª</span>`}</h2>
+      <select class="fm" id="brDivSel" title="División">${divOpts.join("")}</select>
+      <select class="fm" id="brTeamSel" title="Equipo">${teamOpts}</select>
+      ${own?"":`<button class="btn ghostgold sm" id="myTeamBtn">← Mi equipo</button>`}
       <span class="pill" style="background:var(--surface-3);color:var(--muted)">Nivel medio ${avg}/20</span>
-      <span class="pill" style="background:var(--surface-3);color:var(--muted)">${players.length} jugadores</span>
+      <span class="pill" style="background:var(--surface-3);color:var(--muted)">${players.length} jug.</span>
     </div>
-    <p class="sub">Habilidades <b>1-20</b>: POR portería · DEF defensa · JUG jugadas · PAS pases (asistencias) · ANO anotación · TL tiros libres. <b>Nivel</b> = en campo (habilidades + experiencia). <b>Exp</b> = rodaje (sube el nivel hasta +${(EXP_MAX_BONUS/5).toFixed(1)}, ya incluido en Nivel). ✦ = especialidad · © = capitán · 🎯 = lanzador de faltas/penaltis (del once de liga; se asignan en <b>Alineación</b>). Las estrellas son el <b>potencial</b>.</p>
+    <p class="sub">Habilidades <b>1-20</b>: POR portería · DEF defensa · JUG jugadas · PAS pases (asistencias) · ANO anotación · TL tiros libres. <b>Nivel</b> = en campo (habilidades + experiencia). <b>Exp</b> = rodaje. ✦ = especialidad${roleLegend}. Las estrellas son el <b>potencial</b>.</p>
     ${msg}
     <div class="card"><div class="tbl-scroll"><table>
-      <thead><tr><th>Pos</th><th>Jugador</th><th class="num">Edad</th><th style="text-align:center">Nivel</th><th class="num" title="Rodaje / experiencia">Exp</th>${skHead}<th>Pot.</th><th class="num">Gol</th><th></th></tr></thead>
-      <tbody>${players.map(playerRow).join("")}</tbody></table></div></div>`;
+      <thead><tr><th>Pos</th><th>Jugador</th><th class="num">Edad</th><th style="text-align:center">Nivel</th><th class="num" title="Rodaje / experiencia">Exp</th>${skHead}<th>Pot.</th><th class="num">Gol</th>${own?"<th></th>":""}</tr></thead>
+      <tbody>${players.map(p=>playerRow(p,own)).join("")}</tbody></table></div></div>`;
 }
 function bindSquad(){
+  const dv=document.getElementById("brDivSel");
+  if(dv)dv.onchange=()=>{const nd=+dv.value;const first=Object.values(S.teams).filter(x=>x.div===nd).sort((a,b)=>a.short.localeCompare(b.short))[0];browseTeam=(first&&first.id!==S.user)?first.id:(first?null:null);pendingRelease=null;releaseMsg="";render();};
+  const ts=document.getElementById("brTeamSel");
+  if(ts)ts.onchange=()=>{browseTeam=(ts.value===S.user)?null:ts.value;pendingRelease=null;releaseMsg="";render();};
+  const mb=document.getElementById("myTeamBtn");
+  if(mb)mb.onclick=()=>{browseTeam=null;pendingRelease=null;releaseMsg="";render();};
   document.querySelectorAll("[data-rel]").forEach(b=>b.onclick=()=>{pendingRelease=b.dataset.rel;releaseMsg="";render();});
   document.querySelectorAll("[data-relyes]").forEach(b=>b.onclick=()=>release(b.dataset.relyes));
   document.querySelectorAll("[data-relno]").forEach(b=>b.onclick=()=>{pendingRelease=null;render();});
@@ -1396,7 +1417,7 @@ function tableBlock(div){
     const you=t.id===S.user?"is-you":"";
     const fil=t.filial?' <span class="badge-prom" style="background:var(--surface-3);color:var(--faint)">FIL</span>':'';
     return `<tr class="${zone} ${you}"><td class="pos">${i+1}</td>
-      <td><div class="teamcell">${crest(t,26)}<span class="nm">${t.short}${fil}</span></div></td>
+      <td><div class="teamcell" data-openteam="${t.id}" style="cursor:pointer" title="Ver plantilla de ${t.short}">${crest(t,26)}<span class="nm">${t.short}${fil}</span></div></td>
       <td class="num">${t.pj}</td><td class="num">${t.g}</td><td class="num">${t.e}</td><td class="num">${t.p}</td>
       <td class="num">${t.gf}</td><td class="num">${t.gc}</td><td class="num">${t.gf-t.gc>0?"+":""}${t.gf-t.gc}</td>
       <td class="num" style="font-family:var(--font-disp);font-weight:800;font-size:16px">${t.pts}</td>
@@ -1422,7 +1443,10 @@ function viewTable(){
     </div>
     ${tableBlock(d)}`;
 }
-function bindTable(){const s=document.getElementById("divSel");if(s)s.onchange=()=>{tableDiv=+s.value;render();};}
+function bindTable(){
+  const s=document.getElementById("divSel");if(s)s.onchange=()=>{tableDiv=+s.value;render();};
+  document.querySelectorAll("[data-openteam]").forEach(el=>el.onclick=()=>{browseTeam=el.dataset.openteam===S.user?null:el.dataset.openteam;S.screen="squad";render();});
+}
 let statsDiv=null;
 function mainKeeper(t){const gk=t.players.filter(p=>p.pos==="GK");return gk.length?gk.slice().sort((a,b)=>eff(b)-eff(a))[0]:null;}
 function viewStats(){
