@@ -352,6 +352,9 @@ const BASE_TRAIN=0.07;    // ganancia base de entrenamiento por partido (baja: d
 const EXP_MAX_BONUS=9, EXP_K=0.045, EXP_GAIN=1, SEASON_EXP=38;
 function initExp(edad){return Math.max(0,Math.min(220,(edad-17)*18));} // veteranos ya rodados; juveniles ~0
 function expBonus(p){return Math.min(EXP_MAX_BONUS,(p.exp||0)*EXP_K);}
+function expPct(p){return Math.round(Math.min(1,(p.exp||0)/(EXP_MAX_BONUS/EXP_K))*100);} // rodaje 0-100% (100% = bonus máximo)
+function expLvlBonus(p){return expBonus(p)/5;} // lo que la experiencia suma al nivel 1-20 (hasta +1,8)
+function expBar(p){const pct=expPct(p);return `<span style="display:inline-flex;align-items:center;gap:5px"><span style="display:inline-block;width:32px;height:6px;border-radius:3px;background:var(--surface-3);overflow:hidden">${'<span style="display:block;height:100%;width:'+pct+'%;background:var(--gold)"></span>'}</span><span style="font-size:11px;color:var(--muted)">${pct}%</span></span>`;}
 function eff(p){return Math.min(99,p.rating+expBonus(p));} // nivel interno con experiencia (tope 99)
 /* ---------- habilidades 1-20 (estilo Hattrick) ---------- */
 const SKILLS=[["por","POR","Portería"],["def","DEF","Defensa"],["jug","JUG","Jugadas"],["pas","PAS","Pases"],["ano","ANO","Anotación"],["tl","TL","Tiros libres"]];
@@ -1169,6 +1172,7 @@ function playerRow(p){
     <td class="nm" style="font-weight:600">${p.name}${capBadge(p,S.lineup)}${takerBadge(p,S.lineup)} ${isPromesa(p)?'<span class="badge-prom">PROMESA</span>':''}${p.esp?" "+espBadge(p):""}</td>
     <td class="num">${p.edad}</td>
     <td style="text-align:center"><span class="rating" style="${skColor(nivel(p))}" title="Nivel en campo (media de habilidades + experiencia)">${nivel(p)}</span></td>
+    <td class="num" title="Rodaje: ${expPct(p)}% · suma +${expLvlBonus(p).toFixed(1)} al nivel">${expBar(p)}</td>
     ${skillCells(p)}
     <td>${potStars(p.potencial)}</td>
     <td class="num">${p.goles||"·"}</td>
@@ -1188,10 +1192,10 @@ function viewSquad(){
       <span class="pill" style="background:var(--surface-3);color:var(--muted)">Nivel medio ${avg}/20</span>
       <span class="pill" style="background:var(--surface-3);color:var(--muted)">${players.length} jugadores</span>
     </div>
-    <p class="sub">Habilidades <b>1-20</b>: POR portería · DEF defensa · JUG jugadas · PAS pases (asistencias) · ANO anotación · TL tiros libres. <b>Nivel</b> = en campo (habilidades + experiencia). ✦ = especialidad · © = capitán · 🎯 = lanzador de faltas/penaltis (del once de liga; se asignan en <b>Alineación</b>). Las estrellas son el <b>potencial</b>.</p>
+    <p class="sub">Habilidades <b>1-20</b>: POR portería · DEF defensa · JUG jugadas · PAS pases (asistencias) · ANO anotación · TL tiros libres. <b>Nivel</b> = en campo (habilidades + experiencia). <b>Exp</b> = rodaje (sube el nivel hasta +${(EXP_MAX_BONUS/5).toFixed(1)}, ya incluido en Nivel). ✦ = especialidad · © = capitán · 🎯 = lanzador de faltas/penaltis (del once de liga; se asignan en <b>Alineación</b>). Las estrellas son el <b>potencial</b>.</p>
     ${msg}
     <div class="card"><div class="tbl-scroll"><table>
-      <thead><tr><th>Pos</th><th>Jugador</th><th class="num">Edad</th><th style="text-align:center">Nivel</th>${skHead}<th>Pot.</th><th class="num">Gol</th><th></th></tr></thead>
+      <thead><tr><th>Pos</th><th>Jugador</th><th class="num">Edad</th><th style="text-align:center">Nivel</th><th class="num" title="Rodaje / experiencia">Exp</th>${skHead}<th>Pot.</th><th class="num">Gol</th><th></th></tr></thead>
       <tbody>${players.map(playerRow).join("")}</tbody></table></div></div>`;
 }
 function bindSquad(){
@@ -1210,7 +1214,7 @@ function luRow(p,slot){ // slot = puesto del hueco (para marcar fuera de posici�
   return `<div class="lineup-slot" data-swap="${p.id}" style="${st}">
     <span class="slot-lab p-${p.pos}" style="border-radius:6px;padding:2px 0">${p.pos}</span>
     <span style="flex:1;font-weight:600;font-size:14px">${p.name}${capBadge(p,activeLineup())}${takerBadge(p,activeLineup())}${crk}${prom}${p.esp?" "+espBadge(p):""}${fp} <span class="muted" style="font-weight:400">${p.edad}a</span></span>
-    <span class="slot-meta"><span class="rating" style="${skColor(nivel(p))};width:auto;padding:0 7px" title="Nivel en campo">${nivel(p)}</span>${potStars(p.potencial)}</span>
+    <span class="slot-meta"><span class="muted" style="font-size:11px" title="Rodaje / experiencia (suma +${expLvlBonus(p).toFixed(1)} al nivel)">${expPct(p)}%</span><span class="rating" style="${skColor(nivel(p))};width:auto;padding:0 7px" title="Nivel en campo">${nivel(p)}</span>${potStars(p.potencial)}</span>
   </div>`;
 }
 function viewLineup(){
