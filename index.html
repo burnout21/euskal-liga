@@ -68,7 +68,9 @@
   .wrap{max-width:1040px;margin:0 auto;padding:0 20px 80px}
 
   .topbar{position:sticky;top:0;z-index:20;background:var(--bg);border-bottom:2px solid var(--line)}
-  .topbar-in{max-width:1040px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+  .topbar-in{max-width:1040px;margin:0 auto;padding:12px 20px;display:flex;flex-direction:column;gap:10px}
+  .topbar-row1{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .topbar-actions{display:flex;align-items:center;gap:8px;flex:0 0 auto}
   .brand{display:flex;align-items:center;gap:12px;margin-right:auto}
   .brand h1{font-family:var(--font-disp);font-weight:800;font-stretch:condensed;text-transform:uppercase;letter-spacing:.06em;margin:0;font-size:26px;line-height:1}
   .brand .kick{font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--faint);font-weight:700}
@@ -250,16 +252,20 @@
   <h2 class="sr-only">Euskal Liga Manager: gestor deportivo de una liga vasca con entrenamiento y cantera al estilo Hattrick.</h2>
   <div class="topbar">
     <div class="topbar-in">
-      <div class="brand">
-        <div class="ik"><span class="r"></span><span class="w"></span><span class="g"></span></div>
-        <div><div class="kick">Euskal Liga</div><h1>Manager</h1></div>
+      <div class="topbar-row1">
+        <div class="brand">
+          <div class="ik"><span class="r"></span><span class="w"></span><span class="g"></span></div>
+          <div><div class="kick">Euskal Liga</div><h1>Manager</h1></div>
+        </div>
+        <div class="topbar-actions">
+          <button class="iconbtn" id="saveBtn" aria-label="Exportar partida" title="Exportar partida a fichero">💾</button>
+          <button class="iconbtn" id="importBtn" aria-label="Importar partida" title="Importar partida de fichero">📥</button>
+          <button class="iconbtn" id="newBtn2" aria-label="Nueva partida" title="Nueva partida">＋</button>
+          <button class="iconbtn" id="themeBtn" aria-label="Cambiar tema" title="Cambiar tema">◐</button>
+          <input type="file" id="importFile" accept="application/json,.json" style="display:none">
+        </div>
       </div>
       <div class="hud" id="hud"></div>
-      <button class="iconbtn" id="saveBtn" aria-label="Exportar partida" title="Exportar partida a fichero">💾</button>
-      <button class="iconbtn" id="importBtn" aria-label="Importar partida" title="Importar partida de fichero">📥</button>
-      <button class="iconbtn" id="newBtn2" aria-label="Nueva partida" title="Nueva partida">＋</button>
-      <button class="iconbtn" id="themeBtn" aria-label="Cambiar tema" title="Cambiar tema">◐</button>
-      <input type="file" id="importFile" accept="application/json,.json" style="display:none">
     </div>
   </div>
   <div class="wrap" id="root"></div>
@@ -942,6 +948,7 @@ function simMidweek(w){
 /* ---------- ciclo de semana / temporada (32 semanas) ---------- */
 /* ---------- economía: caja, salarios, ingresos y números rojos ---------- */
 const STD_SQUAD=24, SELL_FRACTION=0.7, WAGE_RATE=0.18, SEASON_MARGIN=1.25, ECO_GRACE=16, ECO_PENALTY=3;
+const ANNUAL_INTEREST=0.15, LOAN_FACTOR=0.6; // préstamos: interés anual y límite (% del ingreso base)
 function ageValF(e){return e<=20?0.9:e<=27?1:e===28?0.85:e===29?0.75:e===30?0.6:e===31?0.45:e===32?0.3:0.18;}
 function playerValue(p){return Math.round(Math.pow(nivel(p),2.7)*900*ageValF(p.edad));} // valor de mercado aprox (€)
 function salaryOf(p){return Math.round(playerValue(p)*WAGE_RATE);}                        // salario anual
@@ -950,12 +957,17 @@ function weeklyWages(team){return Math.round(seasonWages(team)/NWEEKS);}
 function pseudoValue(n){return Math.round(Math.pow(n,2.7)*900);}
 function incomeBaseSeason(team){const tn=clampS(Math.round(team.str/5));return Math.round(STD_SQUAD*pseudoValue(tn)*WAGE_RATE*SEASON_MARGIN);} // ingreso "natural" del club (por división/fuerza)
 function debtLimit(team){return -Math.round(incomeBaseSeason(team)*0.75);}   // deuda máxima permitida (negativa)
+function loanLimit(team){return Math.round(incomeBaseSeason(team)*LOAN_FACTOR);}
+function loanHeadroom(team){return Math.max(0,loanLimit(team)-(team.loan||0));}
+function interestWeekly(team){return Math.round((team.loan||0)*ANNUAL_INTEREST/NWEEKS);}
 function tvWeekly(team){return Math.round(incomeBaseSeason(team)*0.30/NWEEKS);}
 function gateHome(team){return Math.round(incomeBaseSeason(team)*0.55/14);}   // taquilla por partido de liga en casa (14 al año)
 function fmtMoney(n){const a=Math.abs(Math.round(n));const s=n<0?"−":"";if(a>=1e6)return s+(a/1e6).toFixed(a>=1e7?0:1).replace(".",",")+" M€";if(a>=1e3)return s+Math.round(a/1e3)+" k€";return s+a+" €";}
 function canSell(team,p){const posN=team.players.filter(x=>x.pos===p.pos).length;return team.players.length>SQUAD_MIN&&posN>MIN_POS[p.pos];}
-function initEco(team){team.caja=Math.round(incomeBaseSeason(team)*0.5);team.redWeeks=0;team.ecoIn=0;team.ecoOut=0;}
-function ensureEco(team){if(typeof team.caja!=="number")initEco(team);if(typeof team.redWeeks!=="number")team.redWeeks=0;if(typeof team.ecoIn!=="number")team.ecoIn=0;if(typeof team.ecoOut!=="number")team.ecoOut=0;}
+function initEco(team){team.caja=Math.round(incomeBaseSeason(team)*0.5);team.redWeeks=0;team.ecoIn=0;team.ecoOut=0;team.loan=0;}
+function ensureEco(team){if(typeof team.caja!=="number")initEco(team);if(typeof team.redWeeks!=="number")team.redWeeks=0;if(typeof team.ecoIn!=="number")team.ecoIn=0;if(typeof team.ecoOut!=="number")team.ecoOut=0;if(typeof team.loan!=="number")team.loan=0;}
+function borrow(amount){const t=S.teams[S.user];ensureEco(t);amount=Math.max(0,Math.min(Math.round(amount||0),loanHeadroom(t)));if(amount<=0)return;t.caja+=amount;t.loan+=amount;saveGame();render();}
+function repay(amount){const t=S.teams[S.user];ensureEco(t);amount=Math.max(0,Math.min(Math.round(amount||0),Math.min(t.caja,t.loan||0)));if(amount<=0)return;t.caja-=amount;t.loan-=amount;saveGame();render();}
 // procesa la semana económica de todos los clubes; devuelve el informe del equipo del usuario
 function economyTick(homeSet){
   let userReport=null;
@@ -964,6 +976,12 @@ function economyTick(homeSet){
     const income=tvWeekly(team)+(homeSet.has(team.id)?gateHome(team):0);
     const expense=weeklyWages(team);
     team.caja+=income-expense; team.ecoIn+=income; team.ecoOut+=expense;
+    const interest=interestWeekly(team); if(interest){team.caja-=interest;team.ecoOut+=interest;} // intereses del préstamo
+    // la IA se financia con préstamo antes de vender, y amortiza cuando tiene holgura
+    if(team.id!==S.user){
+      if(team.caja<0){const b=Math.min(loanHeadroom(team),-team.caja+Math.round(incomeBaseSeason(team)*0.05));if(b>0){team.caja+=b;team.loan+=b;}}
+      else if(team.loan>0){const spare=team.caja-Math.round(incomeBaseSeason(team)*0.4);if(spare>0){const r=Math.min(team.loan,spare);team.caja-=r;team.loan-=r;}}
+    }
     team.redWeeks=team.caja<0?team.redWeeks+1:0;
     // ¿toca actuar? deuda por debajo del tope, o demasiadas semanas en rojo
     if(team.caja<debtLimit(team)||team.redWeeks>ECO_GRACE){
@@ -1155,6 +1173,7 @@ function render(){
   if(S.screen==="squad")bindSquad();
   if(S.screen==="table")bindTable();
   if(S.screen==="stats")bindStats();
+  if(S.screen==="eco")bindEconomia();
   if(S.screen==="lineup")bindLineup();
   if(S.screen==="training")bindTraining();
   if(S.screen==="cantera")bindCantera();
@@ -1544,6 +1563,12 @@ function viewStats(){
     </div>`;
 }
 function bindStats(){const s=document.getElementById("statsSel");if(s)s.onchange=()=>{statsDiv=+s.value;render();};}
+function bindEconomia(){
+  const amt=()=>{const el=document.getElementById("loanAmt");return el?+el.value:0;};
+  const b=document.getElementById("borrowBtn");if(b)b.onclick=()=>borrow(amt());
+  const r=document.getElementById("repayBtn");if(r)r.onclick=()=>repay(amt());
+  const bm=document.getElementById("borrowMaxBtn");if(bm)bm.onclick=()=>borrow(loanHeadroom(S.teams[S.user]));
+}
 function viewEconomia(){
   const t=S.teams[S.user];ensureEco(t);
   const wages=seasonWages(t), wagesW=weeklyWages(t);
@@ -1578,8 +1603,25 @@ function viewEconomia(){
       ${card("Gastos",
         stat("Masa salarial (año)",fmtMoney(wages))+
         stat("Salarios (semana)",fmtMoney(wagesW))+
+        stat("Intereses (semana)",fmtMoney(interestWeekly(t)),(t.loan>0)?"color:var(--bad)":"")+
         stat("Acumulado esta temporada",fmtMoney(t.ecoOut||0),"color:var(--bad)")+
         stat("Balance temporada",fmtMoney(balSeason),balSeason<0?"color:var(--bad)":"color:var(--grass)"))}
+    </div>
+    <div class="sect-title" style="font-size:15px;color:var(--faint);margin:20px 0 6px">🏦 Financiación</div>
+    <div class="card" style="padding:14px">
+      <div style="display:flex;flex-wrap:wrap;gap:22px;margin-bottom:12px;font-size:14px">
+        <div>Préstamo pendiente: <b style="${(t.loan||0)>0?"color:var(--bad)":""}">${fmtMoney(t.loan||0)}</b></div>
+        <div>Límite: <b>${fmtMoney(loanLimit(t))}</b></div>
+        <div>Disponible: <b style="color:var(--grass)">${fmtMoney(loanHeadroom(t))}</b></div>
+        <div>Interés: <b>${Math.round(ANNUAL_INTEREST*100)}%/año</b></div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <input type="number" id="loanAmt" placeholder="importe €" class="fm" style="max-width:170px" min="0" step="50000">
+        <button class="btn ghostgold sm" id="borrowBtn">Pedir</button>
+        <button class="btn ghostgold sm" id="repayBtn">Amortizar</button>
+        <button class="btn ghostgold sm" id="borrowMaxBtn">Pedir máximo</button>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:8px">Un préstamo te da caja al momento; pagas ${Math.round(ANNUAL_INTEREST*100)}% al año sobre lo que debes. Úsalo para puentear un bache si esperas recuperarte con taquilla y premios, en vez de vender.</p>
     </div>
     <div class="sect-title" style="font-size:15px;color:var(--faint);margin:20px 0 6px">Salarios de la plantilla</div>
     <div class="card"><div class="tbl-scroll"><table>
