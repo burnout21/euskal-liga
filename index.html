@@ -1042,7 +1042,7 @@ function nuevaTemporada(){
   // envejecer y desarrollar
   Object.values(S.teams).forEach(t=>{
     const ai=t.id!==S.user;
-    t.players.forEach(p=>{p.edad++;endSeasonDevelop(p);p.goles=0;if(ai)p.exp=Math.min(400,(p.exp||0)+SEASON_EXP);}); // la IA gana experiencia por temporada
+    t.players.forEach(p=>{p.edad++;endSeasonDevelop(p);p.goles=0;p.asis=0;if(ai)p.exp=Math.min(400,(p.exp||0)+SEASON_EXP);}); // la IA gana experiencia por temporada
     maintainSquad(t);
     Object.assign(t,{pj:0,g:0,e:0,p:0,gf:0,gc:0,pts:0,hist:[]});
   });
@@ -1088,11 +1088,12 @@ function render(){
   saveGame(); // autoguardado en el navegador tras cada acción
   renderHud();
   const r=document.getElementById("root");
-  const v={squad:viewSquad,lineup:viewLineup,training:viewTraining,cantera:viewCantera,table:viewTable,fixtures:viewFixtures,copa:viewCopa,results:viewResults,palmares:viewPalmares}[S.screen]||viewSquad;
+  const v={squad:viewSquad,lineup:viewLineup,training:viewTraining,cantera:viewCantera,table:viewTable,stats:viewStats,fixtures:viewFixtures,copa:viewCopa,results:viewResults,palmares:viewPalmares}[S.screen]||viewSquad;
   r.innerHTML=v();
   bindNav();
   if(S.screen==="squad")bindSquad();
   if(S.screen==="table")bindTable();
+  if(S.screen==="stats")bindStats();
   if(S.screen==="lineup")bindLineup();
   if(S.screen==="training")bindTraining();
   if(S.screen==="cantera")bindCantera();
@@ -1127,7 +1128,7 @@ function renderHud(){
   const sb=document.getElementById("simBtn");if(sb)sb.onclick=()=>simJornada();
 }
 function navHtml(active){
-  const items=[["squad","Plantilla"],["lineup","Alineación"],["training","Entrenamiento"],["cantera","Cantera"],["table","Clasificación"],["fixtures","Calendario"],["copa","Copa"],["results","Resultados"],["palmares","Palmarés"]];
+  const items=[["squad","Plantilla"],["lineup","Alineación"],["training","Entrenamiento"],["cantera","Cantera"],["table","Clasificación"],["stats","Estadísticas"],["fixtures","Calendario"],["copa","Copa"],["results","Resultados"],["palmares","Palmarés"]];
   const nav=`<div class="nav">${items.map(([k,l])=>`<button data-screen="${k}" class="${active===k?"active":""}">${l}</button>`).join("")}</div>`;
   return nav+nextMatchHtml();
 }
@@ -1422,6 +1423,41 @@ function viewTable(){
     ${tableBlock(d)}`;
 }
 function bindTable(){const s=document.getElementById("divSel");if(s)s.onchange=()=>{tableDiv=+s.value;render();};}
+let statsDiv=null;
+function mainKeeper(t){const gk=t.players.filter(p=>p.pos==="GK");return gk.length?gk.slice().sort((a,b)=>eff(b)-eff(a))[0]:null;}
+function viewStats(){
+  const d=statsDiv||userDiv();
+  const opts=[];for(let i=1;i<=NDIV;i++)opts.push(`<option value="${i}" ${i===d?"selected":""}>${DIV_NAMES[i]} División</option>`);
+  const teams=Object.values(S.teams).filter(t=>t.div===d);
+  const players=teams.flatMap(t=>t.players.map(p=>({p,t})));
+  const you=t=>t.id===S.user?"is-you":"";
+  const sc=players.filter(x=>(x.p.goles||0)>0).sort((a,b)=>(b.p.goles||0)-(a.p.goles||0)||nivel(b.p)-nivel(a.p)).slice(0,12);
+  const as=players.filter(x=>(x.p.asis||0)>0).sort((a,b)=>(b.p.asis||0)-(a.p.asis||0)||nivel(b.p)-nivel(a.p)).slice(0,12);
+  const zam=teams.map(t=>({t,gk:mainKeeper(t),gc:t.gc,pj:t.pj,avg:t.pj?t.gc/t.pj:0})).filter(z=>z.gk).sort((a,b)=>a.gc-b.gc||b.pj-a.pj).slice(0,12);
+  const empty=n=>`<tr><td colspan="${n}" class="muted" style="padding:14px">Aún no hay datos esta temporada.</td></tr>`;
+  const rowP=(x,i,val)=>`<tr class="${you(x.t)}"><td class="pos">${i+1}</td><td class="nm" style="font-weight:600">${x.p.name}${x.p.esp?" "+espBadge(x.p):""}</td><td><div class="teamcell">${crest(x.t,20)}<span class="nm" style="font-size:13px">${x.t.short}</span></div></td><td class="num" style="font-family:var(--font-disp);font-weight:800;font-size:16px">${val}</td></tr>`;
+  const scRows=sc.length?sc.map((x,i)=>rowP(x,i,x.p.goles)).join(""):empty(4);
+  const asRows=as.length?as.map((x,i)=>rowP(x,i,x.p.asis||0)).join(""):empty(4);
+  const zamRows=zam.length&&teams.some(t=>t.pj>0)?zam.map((z,i)=>`<tr class="${you(z.t)}"><td class="pos">${i+1}</td><td class="nm" style="font-weight:600">${z.gk.name}</td><td><div class="teamcell">${crest(z.t,20)}<span class="nm" style="font-size:13px">${z.t.short}</span></div></td><td class="num">${z.gc}</td><td class="num">${z.pj}</td><td class="num" style="font-family:var(--font-disp);font-weight:800">${z.avg.toFixed(2)}</td></tr>`).join(""):empty(6);
+  const card=(title,icon,head,rows)=>`<div style="flex:1;min-width:280px">
+    <div class="sect-title" style="font-size:15px;color:var(--faint);margin:0 0 6px">${icon} ${title}</div>
+    <div class="card"><div class="tbl-scroll"><table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div></div></div>`;
+  return navHtml("stats")+`
+    <div class="selrow">
+      <h2 class="sect-title" style="margin:0">Estadísticas · T${S.temporada}</h2>
+      <select class="fm" id="statsSel">${opts.join("")}</select>
+      <span class="pill" style="background:var(--surface-3);color:var(--muted)">solo liga</span>
+    </div>
+    <p class="sub">Máximos goleadores (Pichichi), asistentes y porteros menos goleados (Zamora) de la ${DIV_NAMES[d]} División, esta temporada.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:18px">
+      ${card("Goleadores","⚽",`<th>#</th><th>Jugador</th><th>Equipo</th><th class="num">Gol</th>`,scRows)}
+      ${card("Asistentes","🅰️",`<th>#</th><th>Jugador</th><th>Equipo</th><th class="num">Asis</th>`,asRows)}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:18px">
+      ${card("Zamora · porteros menos goleados","🧤",`<th>#</th><th>Portero</th><th>Equipo</th><th class="num">GC</th><th class="num">PJ</th><th class="num">Media</th>`,zamRows)}
+    </div>`;
+}
+function bindStats(){const s=document.getElementById("statsSel");if(s)s.onchange=()=>{statsDiv=+s.value;render();};}
 function viewFixtures(){
   const div=userDiv();const cal=S.leagueCal[div];
   const blocks=cal.map((day,j)=>{
