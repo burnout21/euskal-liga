@@ -543,6 +543,7 @@ function newGame(userTeamId){
   };
   ensureLineupRoles(S.lineup,teams[userTeamId].players);ensureLineupRoles(S.lineupMid,teams[userTeamId].players);
   Object.values(S.teams).forEach(initEco);S.ecoV=ECO_VER;
+  S.offers=[];refreshMarket();
 }
 
 /* ---------- simulación ---------- */
@@ -968,7 +969,7 @@ function interestWeekly(team){return Math.round((team.loan||0)*ANNUAL_INTEREST/N
 function tvWeekly(team){return Math.round(incomeBaseSeason(team)*0.30/NWEEKS);}
 function gateHome(team){return Math.round(incomeBaseSeason(team)*0.55/14);}   // taquilla por partido de liga en casa (14 al año)
 function fmtMoney(n){const a=Math.abs(Math.round(n));const s=n<0?"−":"";if(a>=1e6)return s+(a/1e6).toFixed(a>=1e7?0:1).replace(".",",")+" M€";if(a>=1e3)return s+Math.round(a/1e3)+" k€";return s+a+" €";}
-function canSell(team,p){const posN=team.players.filter(x=>x.pos===p.pos).length;return team.players.length>SQUAD_MIN&&posN>MIN_POS[p.pos];}
+function canSell(team,p){if(p.parent)return false;const posN=team.players.filter(x=>x.pos===p.pos).length;return team.players.length>SQUAD_MIN&&posN>MIN_POS[p.pos];} // no se puede vender/ceder a un jugador que está cedido de otro club
 function initEco(team){team.caja=Math.round(incomeBaseSeason(team)*1.0);team.redWeeks=0;team.ecoIn=0;team.ecoOut=0;team.loan=0;} // arranque holgado: una temporada de ingresos en caja
 function ensureEco(team){if(typeof team.caja!=="number")initEco(team);if(typeof team.redWeeks!=="number")team.redWeeks=0;if(typeof team.ecoIn!=="number")team.ecoIn=0;if(typeof team.ecoOut!=="number")team.ecoOut=0;if(typeof team.loan!=="number")team.loan=0;}
 function borrow(amount){const t=S.teams[S.user];ensureEco(t);amount=Math.max(0,Math.min(Math.round(amount||0),loanHeadroom(t)));if(amount<=0)return;t.caja+=amount;t.loan+=amount;saveGame();render();}
@@ -1018,6 +1019,90 @@ function seasonPrizes(){ // premios de fin de temporada por posición (por divis
     st.forEach((t,i)=>{ensureEco(t);const posF=n>1?(1-i/(n-1))*0.8+0.2:1;t.caja+=Math.round(incomeBaseSeason(t)*0.35*posF);}); // premios generosos por posición final
   }
 }
+/* ---------- mercado de fichajes y cesiones (con ofertas: el club dueño decide) ---------- */
+const SQUAD_MAX=30; // tope de plantilla
+let marketMsg="", marketTab="avail", marketSel=null, marketPosF="ALL", marketDivF=0;
+function findOwner(id){for(const t of Object.values(S.teams)){const p=t.players.find(x=>x.id===id);if(p)return {owner:t,p};}return null;}
+function surplusPlayers(team){return team.players.filter(p=>canSell(team,p)).sort((a,b)=>playerValue(a)-playerValue(b));}
+function refreshMarket(){ // la IA publica excedentes en venta/cesión (se refresca cada temporada)
+  Object.values(S.teams).forEach(t=>{
+    if(t.id===S.user)return;
+    t.players.forEach(p=>{p.listSale=false;p.askPrice=0;p.listLoan=false;});
+    surplusPlayers(t).slice(0,2+rnd(2)).forEach(p=>{p.listSale=true;p.askPrice=Math.round(playerValue(p)*(0.9+Math.random()*0.4));});
+    const yb=t.players.filter(p=>p.edad<=21&&canSell(t,p)).sort((a,b)=>b.potencial-a.potencial)[0];
+    if(yb)yb.listLoan=true;
+  });
+}
+function returnLoans(){ // los cedidos vuelven a su club de origen (fin de temporada)
+  Object.values(S.teams).forEach(t=>{
+    for(let i=t.players.length-1;i>=0;i--){const p=t.players[i];if(p.parent&&p.parent!==t.id){const par=S.teams[p.parent];if(par){t.players.splice(i,1);delete p.parent;delete p.retTemp;par.players.push(p);}else{delete p.parent;delete p.retTemp;}}}
+  });
+}
+// usuario pone a los suyos en venta / cesión
+function setSale(id,price){const t=S.teams[S.user];const p=t.players.find(x=>x.id===id);if(!p||p.parent)return;p.listSale=true;p.listLoan=false;p.askPrice=Math.max(1,Math.round(price||playerValue(p)));saveGame();render();}
+function setLoanList(id){const t=S.teams[S.user];const p=t.players.find(x=>x.id===id);if(!p||p.parent)return;p.listLoan=true;p.listSale=false;saveGame();render();}
+function unlist(id){const t=S.teams[S.user];const p=t.players.find(x=>x.id===id);if(!p)return;p.listSale=false;p.listLoan=false;saveGame();render();}
+// usuario oferta por un jugador de la IA (la IA decide)
+function offerFor(playerId,fee){
+  const u=S.teams[S.user],fo=findOwner(playerId); marketSel=null;
+  if(!fo||fo.owner.id===S.user){marketMsg="Ese jugador ya no está disponible.";render();return;}
+  const {owner,p}=fo; fee=Math.max(0,Math.round(fee||0));
+  if(u.players.length>=SQUAD_MAX){marketMsg=`No puedes tener más de ${SQUAD_MAX} jugadores.`;render();return;}
+  if(fee>u.caja){marketMsg=`No tienes caja para pagar ${fmtMoney(fee)} (puedes pedir un préstamo en Economía).`;render();return;}
+  if(!canSell(owner,p)){marketMsg=`El ${owner.short} no puede desprenderse de ${p.name} (mínimos de plantilla).`;render();return;}
+  const floor=p.listSale?p.askPrice:Math.round(playerValue(p)*1.8); // si no está en venta, hace falta una oferta desorbitada (nadie roba)
+  if(fee>=floor){
+    owner.players=owner.players.filter(x=>x.id!==p.id);
+    p.listSale=false;p.listLoan=false;delete p.parent;delete p.retTemp;
+    u.players.push(p); u.caja-=fee; owner.caja=(owner.caja||0)+fee;
+    marketMsg=`✅ El ${owner.short} ACEPTA: fichas a ${p.name} por ${fmtMoney(fee)}.`;
+  }else{
+    marketMsg=`❌ El ${owner.short} RECHAZA tu oferta de ${fmtMoney(fee)} por ${p.name}${p.listSale?` (pide ${fmtMoney(p.askPrice)})`:" — no está en venta"}.`;
+  }
+  saveGame();render();
+}
+// usuario pide una cesión de un jugador listado para cesión
+function loanRequest(playerId){
+  const u=S.teams[S.user],fo=findOwner(playerId); marketSel=null;
+  if(!fo||fo.owner.id===S.user||!fo.p.listLoan){marketMsg="Esa cesión ya no está disponible.";render();return;}
+  const {owner,p}=fo;
+  if(u.players.length>=SQUAD_MAX){marketMsg=`No puedes tener más de ${SQUAD_MAX} jugadores.`;render();return;}
+  if(!canSell(owner,p)){marketMsg=`El ${owner.short} no puede ceder a ${p.name} ahora.`;render();return;}
+  owner.players=owner.players.filter(x=>x.id!==p.id);
+  p.parent=owner.id;p.retTemp=S.temporada+1;p.listLoan=false;p.listSale=false;
+  u.players.push(p);
+  marketMsg=`✅ El ${owner.short} te CEDE a ${p.name} hasta fin de temporada.`;
+  saveGame();render();
+}
+// ofertas de la IA por los jugadores que el usuario tiene listados (se generan cada semana)
+function marketTick(){
+  const u=S.teams[S.user]; S.offers=S.offers||[];
+  u.players.filter(p=>p.listSale&&!S.offers.some(o=>o.id===p.id)).forEach(p=>{
+    if(Math.random()<0.3){const buyers=Object.values(S.teams).filter(t=>t.id!==S.user&&(t.caja||0)>p.askPrice&&t.players.length<SQUAD_MAX);
+      if(buyers.length){const b=buyers[rnd(buyers.length)];S.offers.push({id:p.id,name:p.name,from:b.id,fee:Math.round(p.askPrice*(0.8+Math.random()*0.4)),kind:"sale"});}}
+  });
+  u.players.filter(p=>p.listLoan&&!S.offers.some(o=>o.id===p.id)).forEach(p=>{
+    if(Math.random()<0.35){const takers=Object.values(S.teams).filter(t=>t.id!==S.user&&t.players.length<SQUAD_MAX);
+      if(takers.length){const b=takers[rnd(takers.length)];S.offers.push({id:p.id,name:p.name,from:b.id,fee:0,kind:"loan"});}}
+  });
+}
+function respondOffer(idx,accept){
+  const u=S.teams[S.user],o=(S.offers||[])[idx]; if(!o)return;
+  const p=u.players.find(x=>x.id===o.id);
+  if(!p){S.offers.splice(idx,1);render();return;}
+  if(accept){
+    const b=S.teams[o.from];
+    if(!canSell(u,p)){marketMsg=`No puedes desprenderte de ${p.name} (mínimos de plantilla).`;render();return;}
+    if(!b||b.players.length>=SQUAD_MAX){S.offers.splice(idx,1);marketMsg="El club interesado ya no tiene sitio.";render();return;}
+    u.players=u.players.filter(x=>x.id!==p.id);
+    if(o.kind==="sale"){u.caja+=o.fee;b.caja=(b.caja||0)-o.fee;p.listSale=false;b.players.push(p);marketMsg=`Vendes a ${p.name} al ${b.short} por ${fmtMoney(o.fee)}.`;}
+    else{p.parent=u.id;p.retTemp=S.temporada+1;p.listLoan=false;b.players.push(p);marketMsg=`Cedes a ${p.name} al ${b.short} hasta fin de temporada.`;}
+    if(S.lineup.xi.includes(p.id))S.lineup.xi=bestXI(u.players,S.lineup.form);
+    if(S.lineupMid.xi.includes(p.id))S.lineupMid.xi=bestXI(u.players,S.lineupMid.form);
+    ensureLineupRoles(S.lineup,u.players);ensureLineupRoles(S.lineupMid,u.players);
+  }
+  S.offers.splice(idx,1);saveGame();render();
+}
 function simJornada(){
   if(S.finished)return;
   const w=S.jornada,lr=leagueRound(w),team=S.teams[S.user];
@@ -1057,6 +1142,7 @@ function simJornada(){
   const homeSet=new Set();
   if(lr>=0)for(let div=1;div<=NDIV;div++)for(const [h] of S.leagueCal[div][lr])homeSet.add(h);
   const ecoRep=economyTick(homeSet);
+  marketTick(); // la IA puede ofertar por tus jugadores listados
   const ups=[];team.players.forEach(p=>{const a=nivel(p);if(a!==before[p.id])ups.push({name:p.name,pos:p.pos,from:before[p.id],to:a,up:a>before[p.id]});});
   const canteraUps=S.cantera.filter(p=>cBefore[p.id]!==undefined&&nivel(p)>cBefore[p.id]).map(p=>({name:p.name,pos:p.pos,from:cBefore[p.id],to:nivel(p)}));
   S.lastDev={ups,nuevos,crack:crackName,canteraUps,eco:ecoRep};
@@ -1122,6 +1208,7 @@ function nuevaTemporada(){
   champ1.palmares.liga1++; champ2.palmares.liga2++;
   S.winners.push({temp:S.temporada,liga1:champ1.id,liga2:champ2.id,copa:S.copaChamp,copaliga:S.copaLigaChamp,super:S.superChamp});
   seasonPrizes(); // premios de fin de temporada según la clasificación final
+  returnLoans();  // los cedidos vuelven a su club
   promoteRelegate();
   // envejecer y desarrollar
   Object.values(S.teams).forEach(t=>{
@@ -1142,6 +1229,7 @@ function nuevaTemporada(){
   S.lineup={form:S.lineup.form,xi:bestXI(u.players,S.lineup.form)};
   S.lineupMid={form:S.lineupMid.form,xi:bestXI(u.players,S.lineupMid.form)};
   ensureLineupRoles(S.lineup,u.players);ensureLineupRoles(S.lineupMid,u.players);
+  S.offers=[];refreshMarket(); // nueva ventana de mercado
   S.screen="squad";render();
 }
 
@@ -1172,13 +1260,14 @@ function render(){
   saveGame(); // autoguardado en el navegador tras cada acción
   renderHud();
   const r=document.getElementById("root");
-  const v={squad:viewSquad,lineup:viewLineup,training:viewTraining,cantera:viewCantera,eco:viewEconomia,table:viewTable,stats:viewStats,fixtures:viewFixtures,copa:viewCopa,results:viewResults,palmares:viewPalmares}[S.screen]||viewSquad;
+  const v={squad:viewSquad,lineup:viewLineup,training:viewTraining,cantera:viewCantera,eco:viewEconomia,market:viewMercado,table:viewTable,stats:viewStats,fixtures:viewFixtures,copa:viewCopa,results:viewResults,palmares:viewPalmares}[S.screen]||viewSquad;
   r.innerHTML=v();
   bindNav();
   if(S.screen==="squad")bindSquad();
   if(S.screen==="table")bindTable();
   if(S.screen==="stats")bindStats();
   if(S.screen==="eco")bindEconomia();
+  if(S.screen==="market")bindMercado();
   if(S.screen==="lineup")bindLineup();
   if(S.screen==="training")bindTraining();
   if(S.screen==="cantera")bindCantera();
@@ -1214,7 +1303,7 @@ function renderHud(){
   const sb=document.getElementById("simBtn");if(sb)sb.onclick=()=>simJornada();
 }
 function navHtml(active){
-  const items=[["squad","Plantilla"],["lineup","Alineación"],["training","Entrenamiento"],["cantera","Cantera"],["eco","Economía"],["table","Clasificación"],["stats","Estadísticas"],["fixtures","Calendario"],["copa","Copa"],["results","Resultados"],["palmares","Palmarés"]];
+  const items=[["squad","Plantilla"],["lineup","Alineación"],["training","Entrenamiento"],["cantera","Cantera"],["eco","Economía"],["market","Mercado"],["table","Clasificación"],["stats","Estadísticas"],["fixtures","Calendario"],["copa","Copa"],["results","Resultados"],["palmares","Palmarés"]];
   const nav=`<div class="nav">${items.map(([k,l])=>`<button data-screen="${k}" class="${active===k?"active":""}">${l}</button>`).join("")}</div>`;
   return nav+nextMatchHtml();
 }
@@ -1574,6 +1663,83 @@ function bindEconomia(){
   const r=document.getElementById("repayBtn");if(r)r.onclick=()=>repay(amt());
   const bm=document.getElementById("borrowMaxBtn");if(bm)bm.onclick=()=>borrow(loanHeadroom(S.teams[S.user]));
 }
+/* ---------- pantalla de Mercado ---------- */
+function loanedOut(){const r=[];Object.values(S.teams).forEach(t=>{if(t.id===S.user)return;t.players.forEach(p=>{if(p.parent===S.user)r.push({p,at:t});});});return r;}
+function viewMercado(){
+  const u=S.teams[S.user];ensureEco(u);
+  const tab=(k,l)=>`<button class="focusbtn ${marketTab===k?"on":""}" data-mtab="${k}" style="flex:0 1 auto;min-width:130px"><div class="fl" style="font-size:15px">${l}</div></button>`;
+  const msg=marketMsg?`<div class="devnote" style="margin-bottom:12px"><div style="font-size:13px">${marketMsg}</div></div>`:"";
+  let body="";
+  if(marketTab==="avail"){
+    const divOpts=[`<option value="0" ${marketDivF===0?"selected":""}>Todas las div.</option>`];for(let i=1;i<=NDIV;i++)divOpts.push(`<option value="${i}" ${i===marketDivF?"selected":""}>${DIV_NAMES[i]} Div.</option>`);
+    const posOpts=["ALL","GK","DF","MF","FW"].map(x=>`<option value="${x}" ${x===marketPosF?"selected":""}>${x==="ALL"?"Todas pos.":x}</option>`).join("");
+    let avail=[];Object.values(S.teams).forEach(t=>{if(t.id===S.user)return;if(marketDivF&&t.div!==marketDivF)return;t.players.forEach(p=>{if((p.listSale||p.listLoan)&&(marketPosF==="ALL"||p.pos===marketPosF))avail.push({p,t});});});
+    avail.sort((a,b)=>playerValue(b.p)-playerValue(a.p));
+    let panel="";
+    if(marketSel){const fo=findOwner(marketSel);if(fo&&fo.owner.id!==S.user){const {owner,p}=fo;
+      panel=`<div class="card" style="padding:14px;margin-bottom:14px;border-color:var(--accent)">
+        <div style="font-weight:700;margin-bottom:6px">${p.name} <span class="pill p-${p.pos}">${p.pos}</span> · ${nivel(p)}/20 · ${p.edad}a · ${crestInline(owner)} ${owner.short}${p.esp?" "+espBadge(p):""}</div>
+        <div class="muted" style="font-size:13px;margin-bottom:8px">Valor: <b>${fmtMoney(playerValue(p))}</b>${p.listSale?` · piden <b>${fmtMoney(p.askPrice)}</b>`:" · no está en venta (harían falta ofertas altísimas)"}${p.listLoan?" · <b>disponible en cesión</b>":""}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+          <input type="number" id="offerAmt" class="fm" style="max-width:170px" min="0" step="100000" value="${p.listSale?p.askPrice:Math.round(playerValue(p)*1.8)}">
+          <button class="btn primary sm" data-offerdo="${p.id}">Ofertar</button>
+          ${p.listLoan?`<button class="btn ghostgold sm" data-loan="${p.id}">Pedir cesión</button>`:""}
+          <button class="btn ghostgold sm" data-negcancel="1">Cancelar</button>
+        </div></div>`;
+    }}
+    const rows=avail.slice(0,60).map(({p,t})=>`<tr>
+      <td class="nm" style="font-weight:600">${p.name}${p.esp?" "+espBadge(p):""}</td>
+      <td><div class="teamcell">${crest(t,18)}<span class="nm" style="font-size:12px">${t.short}</span></div></td>
+      <td><span class="pill p-${p.pos}">${p.pos}</span></td>
+      <td style="text-align:center">${nivel(p)}</td><td class="num">${p.edad}</td>
+      <td class="num">${fmtMoney(playerValue(p))}</td>
+      <td class="num">${p.listSale?fmtMoney(p.askPrice):"—"}</td>
+      <td>${p.listLoan?'<span class="badge-prom" style="background:var(--surface-3);color:var(--faint)">CESIÓN</span>':""}</td>
+      <td style="text-align:right"><button class="btn ghostgold sm" data-negot="${p.id}">Negociar</button></td></tr>`).join("")||`<tr><td colspan="9" class="muted" style="padding:14px">No hay jugadores que cumplan el filtro.</td></tr>`;
+    body=`<div class="selrow"><select class="fm" id="mDivSel">${divOpts.join("")}</select><select class="fm" id="mPosSel">${posOpts}</select><span class="pill" style="background:var(--surface-3);color:var(--muted)">${avail.length} disponibles</span></div>
+      ${panel}
+      <div class="card"><div class="tbl-scroll"><table><thead><tr><th>Jugador</th><th>Club</th><th>Pos</th><th style="text-align:center">Nivel</th><th class="num">Edad</th><th class="num">Valor</th><th class="num">Precio</th><th>Cesión</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  } else if(marketTab==="mine"){
+    const order={GK:0,DF:1,MF:2,FW:3};
+    const mine=u.players.slice().sort((a,b)=>order[a.pos]-order[b.pos]||playerValue(b)-playerValue(a));
+    const rows=mine.map(p=>{
+      const estado=p.parent?`<span class="badge-prom" style="background:color-mix(in srgb,var(--accent) 20%,transparent);color:var(--accent)">CEDIDO DE ${S.teams[p.parent]?S.teams[p.parent].short:"?"}</span>`
+        :p.listSale?`<span class="badge-taker">EN VENTA ${fmtMoney(p.askPrice)}</span>`:p.listLoan?`<span class="badge-cap">EN CESIÓN</span>`:'<span class="muted">—</span>';
+      const acts=p.parent?'<span class="muted" style="font-size:12px">no gestionable</span>':
+        `<input type="number" id="ask_${p.id}" class="fm" style="max-width:120px" min="1" step="100000" value="${p.listSale?p.askPrice:playerValue(p)}"><button class="btn ghostgold sm" data-sell="${p.id}">Vender</button><button class="btn ghostgold sm" data-loanlist="${p.id}">Ceder</button>${(p.listSale||p.listLoan)?`<button class="btn ghostgold sm" data-unlist="${p.id}">Quitar</button>`:""}`;
+      return `<tr><td class="nm" style="font-weight:600">${p.name}${p.esp?" "+espBadge(p):""}</td><td><span class="pill p-${p.pos}">${p.pos}</span></td><td style="text-align:center">${nivel(p)}</td><td class="num">${p.edad}</td><td class="num">${fmtMoney(playerValue(p))}</td><td class="num">${fmtMoney(salaryOf(p))}</td><td>${estado}</td><td><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">${acts}</div></td></tr>`;
+    }).join("");
+    const out=loanedOut();
+    const outHtml=out.length?`<div class="sect-title" style="font-size:15px;color:var(--faint);margin:18px 0 6px">Cedidos fuera (${out.length})</div><div class="card" style="padding:10px 14px">${out.map(({p,at})=>`<div style="font-size:13px;padding:3px 0">${p.name} <span class="muted">(${p.pos})</span> → ${at.short} <span class="muted">· vuelve a fin de temporada</span></div>`).join("")}</div>`:"";
+    body=`<p class="sub">Pon precio y pulsa <b>Vender</b> para ponerlo en el mercado, o <b>Ceder</b> para ofrecerlo en préstamo. Recibirás ofertas de otros clubes en la pestaña <b>Ofertas</b>; tú decides.</p>
+      <div class="card"><div class="tbl-scroll"><table><thead><tr><th>Jugador</th><th>Pos</th><th style="text-align:center">Nivel</th><th class="num">Edad</th><th class="num">Valor</th><th class="num">Salario</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>${outHtml}`;
+  } else {
+    const offers=S.offers||[];
+    const rows=offers.map((o,i)=>{const b=S.teams[o.from];return `<div class="card" style="padding:12px 14px;margin-bottom:8px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+      <div style="font-size:14px">${crestInline(b)} <b>${b?b.short:"?"}</b> ${o.kind==="sale"?`ofrece <b>${fmtMoney(o.fee)}</b> por <b>${o.name}</b>`:`quiere a <b>${o.name}</b> en <b>cesión</b>`}</div>
+      <div style="display:flex;gap:8px"><button class="btn primary sm" data-acc="${i}">Aceptar</button><button class="btn ghostgold sm" data-rej="${i}">Rechazar</button></div></div>`;}).join("")||'<div class="muted" style="padding:14px">No tienes ofertas ahora mismo. Pon jugadores en venta/cesión en <b>Mi club</b> y ve simulando semanas.</div>';
+    body=`<p class="sub">Ofertas de otros clubes por tus jugadores en venta o cesión. Tú decides si aceptas.</p>${rows}`;
+  }
+  return navHtml("market")+`
+    <div class="selrow"><h2 class="sect-title" style="margin:0">🛒 Mercado</h2><span class="pill" style="background:var(--surface-3);${u.caja<0?"color:var(--bad)":"color:var(--muted)"}">Caja ${fmtMoney(u.caja)}</span><span class="pill" style="background:var(--surface-3);color:var(--muted)">${u.players.length}/${SQUAD_MAX} jug.</span></div>
+    <div class="focusrow" style="margin-bottom:14px">${tab("avail","Disponibles")}${tab("mine","Mi club")}${tab("offers","Ofertas"+((S.offers&&S.offers.length)?" ("+S.offers.length+")":""))}</div>
+    ${msg}${body}`;
+}
+function bindMercado(){
+  document.querySelectorAll("[data-mtab]").forEach(b=>b.onclick=()=>{marketTab=b.dataset.mtab;marketSel=null;marketMsg="";render();});
+  const dv=document.getElementById("mDivSel");if(dv)dv.onchange=()=>{marketDivF=+dv.value;render();};
+  const pv=document.getElementById("mPosSel");if(pv)pv.onchange=()=>{marketPosF=pv.value;render();};
+  document.querySelectorAll("[data-negot]").forEach(b=>b.onclick=()=>{marketSel=b.dataset.negot;marketMsg="";render();});
+  document.querySelectorAll("[data-negcancel]").forEach(b=>b.onclick=()=>{marketSel=null;render();});
+  const oa=document.getElementById("offerAmt");
+  document.querySelectorAll("[data-offerdo]").forEach(b=>b.onclick=()=>offerFor(b.dataset.offerdo,oa?+oa.value:0));
+  document.querySelectorAll("[data-loan]").forEach(b=>b.onclick=()=>loanRequest(b.dataset.loan));
+  document.querySelectorAll("[data-sell]").forEach(b=>b.onclick=()=>{const el=document.getElementById("ask_"+b.dataset.sell);setSale(b.dataset.sell,el?+el.value:0);});
+  document.querySelectorAll("[data-loanlist]").forEach(b=>b.onclick=()=>setLoanList(b.dataset.loanlist));
+  document.querySelectorAll("[data-unlist]").forEach(b=>b.onclick=()=>unlist(b.dataset.unlist));
+  document.querySelectorAll("[data-acc]").forEach(b=>b.onclick=()=>respondOffer(+b.dataset.acc,true));
+  document.querySelectorAll("[data-rej]").forEach(b=>b.onclick=()=>respondOffer(+b.dataset.rej,false));
+}
 function viewEconomia(){
   const t=S.teams[S.user];ensureEco(t);
   const wages=seasonWages(t), wagesW=weeklyWages(t);
@@ -1823,6 +1989,8 @@ function restoreRuntime(){ // tras cargar: recomponer contadores de ids/nombres 
   if(S.lineupMid)ensureLineupRoles(S.lineupMid,S.teams[S.user].players);
   if(S.ecoV!==ECO_VER){Object.values(S.teams).forEach(initEco);S.ecoV=ECO_VER;} // migrar saves a la economía nueva (caja generosa)
   else Object.values(S.teams).forEach(ensureEco);
+  if(!Array.isArray(S.offers))S.offers=[];
+  if(!Object.values(S.teams).some(t=>t.id!==S.user&&t.players.some(p=>p.listSale||p.listLoan)))refreshMarket(); // saves sin mercado: poblarlo
   lineupTab="liga";tableDiv=null;pendingRelease=null;pendingReleaseY=null;releaseMsg="";
 }
 function exportSave(){
