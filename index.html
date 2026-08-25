@@ -355,7 +355,7 @@ const INTENS={Baja:0.6,Media:1.0,Alta:1.45};
 const GENERAL_FACTOR=0.5; // entrenamiento general: rinde menos por cabeza que centrarse en una línea
 const BASE_TRAIN=0.07;    // ganancia base de entrenamiento por partido (baja: desarrollo gradual, varias temporadas para hacer un crack)
 // Experiencia: sube jugando (liga x1 / copa x2 / amistoso x0,5) y compensa la edad sin superar a los cracks jóvenes
-const EXP_MAX_BONUS=9, EXP_K=0.045, EXP_GAIN=1, SEASON_EXP=38;
+const EXP_MAX_BONUS=9, EXP_K=0.045, EXP_GAIN=0.6, SEASON_EXP=24; // la experiencia cuesta más de subir: un equipo de puros jóvenes tarda varias temporadas en curtirse
 function initExp(edad){return Math.max(0,Math.min(220,(edad-17)*18));} // veteranos ya rodados; juveniles ~0
 function expBonus(p){return Math.min(EXP_MAX_BONUS,(p.exp||0)*EXP_K);}
 function expPct(p){return Math.round(Math.min(1,(p.exp||0)/(EXP_MAX_BONUS/EXP_K))*100);} // rodaje 0-100% (100% = bonus máximo)
@@ -542,7 +542,7 @@ function newGame(userTeamId){
     history:{},lastResults:null,lastDev:null,finished:false,screen:"squad",
   };
   ensureLineupRoles(S.lineup,teams[userTeamId].players);ensureLineupRoles(S.lineupMid,teams[userTeamId].players);
-  Object.values(S.teams).forEach(initEco);
+  Object.values(S.teams).forEach(initEco);S.ecoV=ECO_VER;
 }
 
 /* ---------- simulación ---------- */
@@ -947,15 +947,20 @@ function simMidweek(w){
 
 /* ---------- ciclo de semana / temporada (32 semanas) ---------- */
 /* ---------- economía: caja, salarios, ingresos y números rojos ---------- */
-const STD_SQUAD=24, SELL_FRACTION=0.7, WAGE_RATE=0.18, SEASON_MARGIN=1.25, ECO_GRACE=16, ECO_PENALTY=3;
-const ANNUAL_INTEREST=0.15, LOAN_FACTOR=0.6; // préstamos: interés anual y límite (% del ingreso base)
-function ageValF(e){return e<=20?0.9:e<=27?1:e===28?0.85:e===29?0.75:e===30?0.6:e===31?0.45:e===32?0.3:0.18;}
-function playerValue(p){return Math.round(Math.pow(nivel(p),2.7)*900*ageValF(p.edad));} // valor de mercado aprox (€)
-function salaryOf(p){return Math.round(playerValue(p)*WAGE_RATE);}                        // salario anual
+const STD_SQUAD=24, SELL_FRACTION=0.7, ECO_GRACE=16, ECO_PENALTY=3;
+const ANNUAL_INTEREST=0.15, LOAN_FACTOR=0.6;      // préstamos: interés anual y límite (% del ingreso base)
+const SAL_K=1400, ECO_GEN=1.5, ECO_VER=2;         // salario base, generosidad (ingreso vs masa salarial) y versión de economía
+// valor de mercado (para traspasos): pico en la plenitud, baja con la edad
+function ageValF(e){return e<=20?0.92:e<=27?1:e===28?0.85:e===29?0.75:e===30?0.6:e===31?0.45:e===32?0.32:0.2;}
+function playerValue(p){return Math.round(Math.pow(nivel(p),2.7)*1400*ageValF(p.edad));}
+// salario estilo NBA: el rodaje (experiencia) es el motor -> el novato cobra poco y el veterano rodado cobra bastante más, a igual nivel
+function primeSalary(n){return Math.pow(n,2.4)*SAL_K;}
+function salaryExpF(p){return 0.7+0.6*(expPct(p)/100);}   // 0,70 (novato) -> 1,30 (veterano rodado): premia la experiencia
+function salaryAgeF(e){return e<=30?1:e<=32?0.95:e<=34?0.88:0.8;} // leve declive al final de la carrera
+function salaryOf(p){return Math.round(primeSalary(nivel(p))*salaryExpF(p)*salaryAgeF(p.edad));}
 function seasonWages(team){return team.players.reduce((s,p)=>s+salaryOf(p),0);}
 function weeklyWages(team){return Math.round(seasonWages(team)/NWEEKS);}
-function pseudoValue(n){return Math.round(Math.pow(n,2.7)*900);}
-function incomeBaseSeason(team){const tn=clampS(Math.round(team.str/5));return Math.round(STD_SQUAD*pseudoValue(tn)*WAGE_RATE*SEASON_MARGIN);} // ingreso "natural" del club (por división/fuerza)
+function incomeBaseSeason(team){const tn=clampS(Math.round(team.str/5)+2);return Math.round(STD_SQUAD*primeSalary(tn)*ECO_GEN);} // ingreso "natural" del club; +2 de nivel y ECO_GEN contemplan una liga ya rodada, dejando margen (mercado con dinero)
 function debtLimit(team){return -Math.round(incomeBaseSeason(team)*0.75);}   // deuda máxima permitida (negativa)
 function loanLimit(team){return Math.round(incomeBaseSeason(team)*LOAN_FACTOR);}
 function loanHeadroom(team){return Math.max(0,loanLimit(team)-(team.loan||0));}
@@ -964,7 +969,7 @@ function tvWeekly(team){return Math.round(incomeBaseSeason(team)*0.30/NWEEKS);}
 function gateHome(team){return Math.round(incomeBaseSeason(team)*0.55/14);}   // taquilla por partido de liga en casa (14 al año)
 function fmtMoney(n){const a=Math.abs(Math.round(n));const s=n<0?"−":"";if(a>=1e6)return s+(a/1e6).toFixed(a>=1e7?0:1).replace(".",",")+" M€";if(a>=1e3)return s+Math.round(a/1e3)+" k€";return s+a+" €";}
 function canSell(team,p){const posN=team.players.filter(x=>x.pos===p.pos).length;return team.players.length>SQUAD_MIN&&posN>MIN_POS[p.pos];}
-function initEco(team){team.caja=Math.round(incomeBaseSeason(team)*0.5);team.redWeeks=0;team.ecoIn=0;team.ecoOut=0;team.loan=0;}
+function initEco(team){team.caja=Math.round(incomeBaseSeason(team)*1.0);team.redWeeks=0;team.ecoIn=0;team.ecoOut=0;team.loan=0;} // arranque holgado: una temporada de ingresos en caja
 function ensureEco(team){if(typeof team.caja!=="number")initEco(team);if(typeof team.redWeeks!=="number")team.redWeeks=0;if(typeof team.ecoIn!=="number")team.ecoIn=0;if(typeof team.ecoOut!=="number")team.ecoOut=0;if(typeof team.loan!=="number")team.loan=0;}
 function borrow(amount){const t=S.teams[S.user];ensureEco(t);amount=Math.max(0,Math.min(Math.round(amount||0),loanHeadroom(t)));if(amount<=0)return;t.caja+=amount;t.loan+=amount;saveGame();render();}
 function repay(amount){const t=S.teams[S.user];ensureEco(t);amount=Math.max(0,Math.min(Math.round(amount||0),Math.min(t.caja,t.loan||0)));if(amount<=0)return;t.caja-=amount;t.loan-=amount;saveGame();render();}
@@ -1010,7 +1015,7 @@ function economyTick(homeSet){
 function seasonPrizes(){ // premios de fin de temporada por posición (por división)
   for(let div=1;div<=NDIV;div++){
     const st=standings(div),n=st.length;
-    st.forEach((t,i)=>{ensureEco(t);const posF=n>1?(1-i/(n-1))*0.8+0.2:1;t.caja+=Math.round(incomeBaseSeason(t)*0.15*posF);});
+    st.forEach((t,i)=>{ensureEco(t);const posF=n>1?(1-i/(n-1))*0.8+0.2:1;t.caja+=Math.round(incomeBaseSeason(t)*0.35*posF);}); // premios generosos por posición final
   }
 }
 function simJornada(){
@@ -1816,7 +1821,8 @@ function restoreRuntime(){ // tras cargar: recomponer contadores de ids/nombres 
   PID=mx+1;
   if(S.lineup)ensureLineupRoles(S.lineup,S.teams[S.user].players); // saves antiguos: asignar capitán/lanzador por alineación
   if(S.lineupMid)ensureLineupRoles(S.lineupMid,S.teams[S.user].players);
-  Object.values(S.teams).forEach(ensureEco); // saves antiguos: inicializar economía
+  if(S.ecoV!==ECO_VER){Object.values(S.teams).forEach(initEco);S.ecoV=ECO_VER;} // migrar saves a la economía nueva (caja generosa)
+  else Object.values(S.teams).forEach(ensureEco);
   lineupTab="liga";tableDiv=null;pendingRelease=null;pendingReleaseY=null;releaseMsg="";
 }
 function exportSave(){
