@@ -142,6 +142,8 @@
   .badge-crack{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:9px;letter-spacing:.08em;background:color-mix(in srgb,#a06bff 32%,transparent);color:#c9a8ff;padding:1px 6px;border-radius:6px;vertical-align:middle}
   .badge-cap{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:9px;letter-spacing:.08em;background:color-mix(in srgb,var(--gold) 34%,transparent);color:var(--gold-ink);padding:1px 6px;border-radius:6px;vertical-align:middle}
   .badge-taker{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:9px;letter-spacing:.08em;background:color-mix(in srgb,var(--accent) 30%,transparent);color:var(--accent);padding:1px 6px;border-radius:6px;vertical-align:middle}
+  .badge-cant{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:9px;letter-spacing:.08em;background:color-mix(in srgb,var(--grass) 32%,transparent);color:var(--grass);padding:1px 6px;border-radius:6px;vertical-align:middle}
+  .badge-propio{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:9px;letter-spacing:.08em;background:color-mix(in srgb,#5b8def 30%,transparent);color:#5b8def;padding:1px 6px;border-radius:6px;vertical-align:middle}
   :root[data-theme="light"] .badge-crack{color:#6a2fce}
   @media(prefers-color-scheme:light){:root:not([data-theme="dark"]) .badge-crack{color:#6a2fce}}
   .trend-up{color:var(--good);font-weight:700}
@@ -479,7 +481,10 @@ function genSquad(baseStr){
       const rank=i===0?4:i<2?1:-3;
       const edad=ageFor(pos);
       let r=baseStr+gauss()*5+rank;
-      players.push(mkPlayer(pos,r,edad));
+      const pl=mkPlayer(pos,r,edad);
+      pl.arrivedTemp=-3;                 // plantilla establecida: son "propios" desde el inicio
+      if(Math.random()<0.4)pl.homegrown=true; // ~40% canteranos del club
+      players.push(pl);
     }
   }
   return players;
@@ -498,7 +503,9 @@ function genProspect(baseStr,pos,crack){
 function regen(pos,baseStr){
   const edad=17+rnd(2);
   const rating=clampR(baseStr-8+gauss()*4);
-  return mkPlayer(pos,rating,edad);
+  const p=mkPlayer(pos,rating,edad);
+  p.homegrown=true;p.arrivedTemp=(typeof S!=="undefined"&&S)?S.temporada:1; // producto de la propia cantera
+  return p;
 }
 
 function bestXI(players,form){
@@ -547,6 +554,12 @@ function newGame(userTeamId){
   S.offers=[];S.freeAgents=[];refreshMarket();seedFreeAgents(8);
 }
 
+/* ---------- identidad: canterano (de tu cantera) y propio (3+ temporadas), estilo trainera ---------- */
+const CANT_BONUS=0.08, PROP_BONUS=0.04, PROP_YEARS=3;
+function isCanterano(p){return !!p.homegrown&&!p.parent;}                                   // formado en la cantera del club
+function isPropio(p){return !p.homegrown&&!p.parent&&(S.temporada-(p.arrivedTemp||S.temporada))>=PROP_YEARS;} // 3+ temporadas en el club
+function identMult(p){return p.parent?1:(p.homegrown?1+CANT_BONUS:((S.temporada-(p.arrivedTemp||S.temporada))>=PROP_YEARS?1+PROP_BONUS:1));}
+function identBadge(p){return isCanterano(p)?'<span class="badge-cant" title="Canterano: formado en el club (+'+Math.round(CANT_BONUS*100)+'%)">🌱 CANT</span>':isPropio(p)?'<span class="badge-propio" title="Propio: 3+ temporadas en el club (+'+Math.round(PROP_BONUS*100)+'%)">🏠 PROPIO</span>':'';}
 /* ---------- simulación ---------- */
 function xiRating(team,xiIds,form,big){
   const map={};team.players.forEach(p=>map[p.id]=p);
@@ -558,7 +571,7 @@ function xiRating(team,xiIds,form,big){
     const slot=slots[i]||p.pos;
     let pen=outPen(p.pos,slot);
     if(p.esp==="rapido"&&pen<1)pen=Math.min(1,pen+0.15); // se adapta mejor fuera de su puesto
-    const val=slotSkill(p,slot,true)*pen*espSectorMult(p,slot,big)*5; // habilidad del hueco * compatibilidad * especialidad * 5
+    const val=slotSkill(p,slot,true)*pen*espSectorMult(p,slot,big)*identMult(p)*5; // habilidad del hueco * compatibilidad * especialidad * identidad(canterano/propio) * 5
     allSum+=val;
     if(p.esp==="lider")hasLider=true;
     if(slot==="GK"||slot==="DF"){defSum+=val;defN++;}else{attSum+=val;attN++;}
@@ -685,22 +698,17 @@ function academyTrain(){
   const mentor=1+0.2*capQ(cap||null);
   S.cantera.forEach(p=>{ p.rating=clampR(p.rating+trainGain(p,1,1.2*mentor)); });
 }
-const CANTERA_CAP=40;
+const CANTERA_CAP=20;                         // tope de juveniles en la cantera
+const YOUTH_N=8, YOUTH_CRACKS=2;             // ~1 juvenil cada 4 semanas (8/temporada), de ellos 2 cracks
 const INVEST_BONUS={Baja:-6,Media:0,Alta:8}; // inversión en cantera: sube/baja el nivel de los juveniles
 function canteraStr(){return clampR(S.teams[S.user].str+INVEST_BONUS[S.canteraInvest||"Media"]);}
 function buildYouthPlan(){
-  // 32 juveniles por temporada (uno por semana): 3 POR + resto ~40% DEF / 40% MED / 20% DEL
-  const total=32;
-  const plan=[];
-  for(let i=0;i<3;i++)plan.push("GK");
-  const fw=6+rnd(2);                        // 6-7 delanteros (~20%)
-  for(let i=0;i<fw;i++)plan.push("FW");
-  const rest=total-3-fw;                    // defensas + medios
-  const df=Math.floor(rest/2)+rnd(2);
-  const mf=rest-df;
-  for(let i=0;i<df;i++)plan.push("DF");
-  for(let i=0;i<mf;i++)plan.push("MF");
-  return shuffle(plan);                     // orden aleatorio de aparición
+  // ~8 juveniles por temporada, en semanas repartidas; 2 de ellos cracks
+  const plan=new Array(NWEEKS).fill(null);
+  const weeks=shuffle([...Array(NWEEKS).keys()]).slice(0,YOUTH_N).sort((a,b)=>a-b);
+  const crackSet=new Set(shuffle(weeks.slice()).slice(0,YOUTH_CRACKS));
+  weeks.forEach(w=>plan[w]={crack:crackSet.has(w)});
+  return plan;
 }
 function addYouths(batch){
   const before=new Set(S.cantera.map(p=>p.id)); // los que ya estaban (la hornada nueva no se recorta)
@@ -724,6 +732,7 @@ function promote(prospectId){
   if(i<0)return;
   if(!canPromote(S.cantera[i]))return; // aún no puede subir
   const p=S.cantera.splice(i,1)[0];
+  p.homegrown=true;p.arrivedTemp=S.temporada; // sube como CANTERANO del club
   S.teams[S.user].players.push(p);
   render();
 }
@@ -1053,6 +1062,7 @@ function signFree(id){
   if(i<0){marketMsg="Ese agente libre ya no está disponible.";render();return;}
   if(u.players.length>=SQUAD_MAX){marketMsg=`No puedes tener más de ${SQUAD_MAX} jugadores.`;render();return;}
   const p=S.freeAgents.splice(i,1)[0]; p.listSale=false;p.listLoan=false;delete p.parent;delete p.retTemp;
+  p.homegrown=false;p.arrivedTemp=S.temporada; // fichaje: aún no es "propio"
   u.players.push(p);
   marketMsg=`✅ Fichas a ${p.name} como agente libre: gratis, solo asumes su salario (${fmtMoney(salaryOf(p))}/año).`;
   saveGame();render();
@@ -1069,6 +1079,7 @@ function offerFor(playerId,fee){
   if(fee>=floor){
     owner.players=owner.players.filter(x=>x.id!==p.id);
     p.listSale=false;p.listLoan=false;delete p.parent;delete p.retTemp;
+    p.homegrown=false;p.arrivedTemp=S.temporada; // cambia de club: pierde identidad, tendrá que ganarse ser "propio"
     u.players.push(p); u.caja-=fee; owner.caja=(owner.caja||0)+fee;
     marketMsg=`✅ El ${owner.short} ACEPTA: fichas a ${p.name} por ${fmtMoney(fee)}.`;
   }else{
@@ -1106,6 +1117,7 @@ function marketTick(){
     if(needy.length&&Math.random()<0.6){const club=needy[rnd(needy.length)];
       const pool=S.freeAgents.slice().sort((a,b)=>playerValue(b)-playerValue(a));
       const fa=pool[rnd(Math.min(4,pool.length))];
+      fa.homegrown=false;fa.arrivedTemp=S.temporada;
       S.freeAgents=S.freeAgents.filter(p=>p.id!==fa.id);club.players.push(fa);}
   }
 }
@@ -1118,7 +1130,7 @@ function respondOffer(idx,accept){
     if(!canSell(u,p)){marketMsg=`No puedes desprenderte de ${p.name} (mínimos de plantilla).`;render();return;}
     if(!b||b.players.length>=SQUAD_MAX){S.offers.splice(idx,1);marketMsg="El club interesado ya no tiene sitio.";render();return;}
     u.players=u.players.filter(x=>x.id!==p.id);
-    if(o.kind==="sale"){u.caja+=o.fee;b.caja=(b.caja||0)-o.fee;p.listSale=false;b.players.push(p);marketMsg=`Vendes a ${p.name} al ${b.short} por ${fmtMoney(o.fee)}.`;}
+    if(o.kind==="sale"){u.caja+=o.fee;b.caja=(b.caja||0)-o.fee;p.listSale=false;p.homegrown=false;p.arrivedTemp=S.temporada;b.players.push(p);marketMsg=`Vendes a ${p.name} al ${b.short} por ${fmtMoney(o.fee)}.`;}
     else{p.parent=u.id;p.retTemp=S.temporada+1;p.listLoan=false;b.players.push(p);marketMsg=`Cedes a ${p.name} al ${b.short} hasta fin de temporada.`;}
     if(S.lineup.xi.includes(p.id))S.lineup.xi=bestXI(u.players,S.lineup.form);
     if(S.lineupMid.xi.includes(p.id))S.lineupMid.xi=bestXI(u.players,S.lineupMid.form);
@@ -1149,16 +1161,16 @@ function simJornada(){
   weeklyDecline();
   const cBefore={};S.cantera.forEach(p=>cBefore[p.id]=nivel(p));
   academyTrain();
-  const pos=S.youthPlan[w];
+  const slot=S.youthPlan[w];
   let nuevos=[],crackName=null;
-  if(pos){
-    const isCrack=((w+1)%8===0); // crack cada 8 semanas -> 4 por temporada (sem 8,16,24,32), todos con especialidad
-    let cpos=pos;
-    if(isCrack){ // reparto 9/35/35/21, pero garantía de 1 portero cada 11 cracks
+  if(slot){
+    const isCrack=!!slot.crack; // ~2 cracks por temporada, siempre con especialidad
+    let cpos;
+    if(isCrack){ // reparto 9/35/35/21, con garantía de portero cada 3 cracks sin uno
       const since=S.crackSinceGK||0;
-      cpos=since>=10?"GK":crackPos();
+      cpos=since>=3?"GK":crackPos();
       S.crackSinceGK=cpos==="GK"?0:since+1;
-    }
+    }else cpos=pick(["GK","DF","DF","DF","MF","MF","MF","FW","FW"]); // ~11% POR / 33% DEF / 33% MED / 22% DEL
     const p=genProspect(canteraStr(),cpos,isCrack);nuevos=addYouths([p]);if(isCrack&&S.cantera.includes(p))crackName=p.name;
   }
   // economía: cobros/pagos de la semana y control de números rojos (todos los clubes)
@@ -1375,7 +1387,7 @@ function playerRow(p,own){
   const roles=own?`${capBadge(p,S.lineup)}${takerBadge(p,S.lineup)}`:"";
   return `<tr>
     <td><span class="pill p-${p.pos}">${p.pos}</span></td>
-    <td class="nm" style="font-weight:600">${p.name}${roles} ${isPromesa(p)?'<span class="badge-prom">PROMESA</span>':''}${p.esp?" "+espBadge(p):""}</td>
+    <td class="nm" style="font-weight:600">${p.name}${roles} ${identBadge(p)}${isPromesa(p)?' <span class="badge-prom">PROMESA</span>':''}${p.esp?" "+espBadge(p):""}</td>
     <td class="num">${p.edad}</td>
     <td style="text-align:center"><span class="rating" style="${skColor(nivel(p))}" title="Nivel en campo (media de habilidades + experiencia)">${nivel(p)}</span></td>
     <td class="num" title="Rodaje: ${expPct(p)}% · suma +${expLvlBonus(p).toFixed(1)} al nivel">${expBar(p)}</td>
@@ -1435,7 +1447,7 @@ function luRow(p,slot){ // slot = puesto del hueco (para marcar fuera de posici�
   const fp=(slot&&slot!==p.pos)?` <span class="badge-prom" style="background:color-mix(in srgb,var(--bad) 20%,transparent);color:var(--bad)" title="Fuera de su posición: rinde peor">⚠ ${slot}</span>`:"";
   return `<div class="lineup-slot" data-swap="${p.id}" style="${st}">
     <span class="slot-lab p-${p.pos}" style="border-radius:6px;padding:2px 0">${p.pos}</span>
-    <span style="flex:1;font-weight:600;font-size:14px">${p.name}${capBadge(p,activeLineup())}${takerBadge(p,activeLineup())}${crk}${prom}${p.esp?" "+espBadge(p):""}${fp} <span class="muted" style="font-weight:400">${p.edad}a</span></span>
+    <span style="flex:1;font-weight:600;font-size:14px">${p.name}${capBadge(p,activeLineup())}${takerBadge(p,activeLineup())} ${identBadge(p)}${crk}${prom}${p.esp?" "+espBadge(p):""}${fp} <span class="muted" style="font-weight:400">${p.edad}a</span></span>
     <span class="slot-meta"><span class="muted" style="font-size:11px" title="Rodaje / experiencia (suma +${expLvlBonus(p).toFixed(1)} al nivel)">${expPct(p)}%</span><span class="rating" style="${skColor(nivel(p))};width:auto;padding:0 7px" title="Nivel en campo">${nivel(p)}</span>${potStars(p.potencial)}</span>
   </div>`;
 }
@@ -2027,6 +2039,7 @@ function restoreRuntime(){ // tras cargar: recomponer contadores de ids/nombres 
   if(!Array.isArray(S.freeAgents))S.freeAgents=[];
   if(!Object.values(S.teams).some(t=>t.id!==S.user&&t.players.some(p=>p.listSale||p.listLoan)))refreshMarket(); // saves sin mercado: poblarlo
   if(S.freeAgents.length===0)seedFreeAgents(8);
+  if(S.youthPlan&&S.youthPlan.some(x=>x&&typeof x!=="object"))S.youthPlan=buildYouthPlan(); // migrar plan de cantera antiguo (menos juveniles)
   lineupTab="liga";tableDiv=null;pendingRelease=null;pendingReleaseY=null;releaseMsg="";
 }
 function exportSave(){
