@@ -544,7 +544,7 @@ function newGame(userTeamId){
   };
   ensureLineupRoles(S.lineup,teams[userTeamId].players);ensureLineupRoles(S.lineupMid,teams[userTeamId].players);
   Object.values(S.teams).forEach(initEco);S.ecoV=ECO_VER;
-  S.offers=[];refreshMarket();
+  S.offers=[];S.freeAgents=[];refreshMarket();seedFreeAgents(8);
 }
 
 /* ---------- simulación ---------- */
@@ -616,10 +616,10 @@ function setPieces(team,xi,oppXi,origIds){
 function simMatch(homeId,awayId,homeXi,awayXi,homeForm,awayForm,big){
   const H=S.teams[homeId],A=S.teams[awayId];
   const hr=xiRating(H,homeXi,homeForm,big),ar=xiRating(A,awayXi,awayForm,big);
-  const HOME=3.2, OP=0.84; // parte del gol llega por balón parado; el juego abierto se escala para no descuadrar el total
+  const HOME=3.2, OP=0.84, STR_W=0.085; // STR_W: cuánto pesa la diferencia de fuerza (más alto = menos lotería, los buenos dominan más)
   const dh=(hr.attR-ar.defR)+HOME, da=(ar.attR-hr.defR)-HOME*0.5;
-  const xgH=Math.max(0.18,Math.min(4.4,1.35+dh*0.055))*OP;
-  const xgA=Math.max(0.14,Math.min(4.0,1.15+da*0.055))*OP;
+  const xgH=Math.max(0.14,Math.min(4.6,1.14+dh*STR_W))*OP;
+  const xgA=Math.max(0.10,Math.min(4.2,0.96+da*STR_W))*OP;
   const ghOpen=poisson(xgH),gaOpen=poisson(xgA);
   const spH=setPieces(H,hr.xi,ar.xi,homeXi), spA=setPieces(A,ar.xi,hr.xi,awayXi); // faltas/penaltis, lanzador (según alineación) vs portero rival
   const evs=makeEvents(H,hr.xi,ghOpen,A,ar.xi,gaOpen).concat(spH.events,spA.events).sort((a,b)=>a.min-b.min);
@@ -741,8 +741,11 @@ function release(id){
   const cnt=team.players.filter(x=>x.pos===p.pos).length;
   if(cnt<=MIN_POS[p.pos]){pendingRelease=null;releaseMsg=`No puedes bajar de ${MIN_POS[p.pos]} en ${POS_LABEL[p.pos]}: ficha o promociona antes de despedir a ${p.name}.`;render();return;}
   team.players=team.players.filter(x=>x.id!==id);
+  p.listSale=false;p.listLoan=false;delete p.parent;delete p.retTemp;
+  S.freeAgents=S.freeAgents||[];S.freeAgents.push(p); // el despedido queda como agente libre (otros clubes pueden ficharlo)
   if(S.lineup.xi.includes(id))S.lineup.xi=bestXI(team.players,S.lineup.form);
   if(S.lineupMid.xi.includes(id))S.lineupMid.xi=bestXI(team.players,S.lineupMid.form);
+  ensureLineupRoles(S.lineup,team.players);ensureLineupRoles(S.lineupMid,team.players);
   pendingRelease=null;releaseMsg="";render();
 }
 function lineStrength(team,xiIds){ // fuerzas del once por habilidad (1-20)
@@ -1043,6 +1046,17 @@ function returnLoans(){ // los cedidos vuelven a su club de origen (fin de tempo
 function setSale(id,price){const t=S.teams[S.user];const p=t.players.find(x=>x.id===id);if(!p||p.parent)return;p.listSale=true;p.listLoan=false;p.askPrice=Math.max(1,Math.round(price||playerValue(p)));saveGame();render();}
 function setLoanList(id){const t=S.teams[S.user];const p=t.players.find(x=>x.id===id);if(!p||p.parent)return;p.listLoan=true;p.listSale=false;saveGame();render();}
 function unlist(id){const t=S.teams[S.user];const p=t.players.find(x=>x.id===id);if(!p)return;p.listSale=false;p.listLoan=false;saveGame();render();}
+function seedFreeAgents(n){S.freeAgents=S.freeAgents||[];for(let i=0;i<n;i++){const pos=pick(["GK","DF","DF","MF","MF","FW"]);const p=genProspect(clampR(56+rnd(26)),pos,false);p.edad=23+rnd(10);p.exp=initExp(p.edad);p.listSale=false;p.listLoan=false;delete p.parent;S.freeAgents.push(p);}}
+// usuario ficha a un agente libre (sin traspaso: solo asume su salario)
+function signFree(id){
+  const u=S.teams[S.user]; S.freeAgents=S.freeAgents||[]; const i=S.freeAgents.findIndex(p=>p.id===id); marketSel=null;
+  if(i<0){marketMsg="Ese agente libre ya no está disponible.";render();return;}
+  if(u.players.length>=SQUAD_MAX){marketMsg=`No puedes tener más de ${SQUAD_MAX} jugadores.`;render();return;}
+  const p=S.freeAgents.splice(i,1)[0]; p.listSale=false;p.listLoan=false;delete p.parent;delete p.retTemp;
+  u.players.push(p);
+  marketMsg=`✅ Fichas a ${p.name} como agente libre: gratis, solo asumes su salario (${fmtMoney(salaryOf(p))}/año).`;
+  saveGame();render();
+}
 // usuario oferta por un jugador de la IA (la IA decide)
 function offerFor(playerId,fee){
   const u=S.teams[S.user],fo=findOwner(playerId); marketSel=null;
@@ -1086,6 +1100,14 @@ function marketTick(){
     if(Math.random()<0.35){const takers=Object.values(S.teams).filter(t=>t.id!==S.user&&t.players.length<SQUAD_MAX);
       if(takers.length){const b=takers[rnd(takers.length)];S.offers.push({id:p.id,name:p.name,from:b.id,fee:0,kind:"loan"});}}
   });
+  // la IA también ficha agentes libres (compites con ella: si tardas, te lo quitan)
+  if((S.freeAgents||[]).length){
+    const needy=Object.values(S.teams).filter(t=>t.id!==S.user&&t.players.length<24);
+    if(needy.length&&Math.random()<0.6){const club=needy[rnd(needy.length)];
+      const pool=S.freeAgents.slice().sort((a,b)=>playerValue(b)-playerValue(a));
+      const fa=pool[rnd(Math.min(4,pool.length))];
+      S.freeAgents=S.freeAgents.filter(p=>p.id!==fa.id);club.players.push(fa);}
+  }
 }
 function respondOffer(idx,accept){
   const u=S.teams[S.user],o=(S.offers||[])[idx]; if(!o)return;
@@ -1231,6 +1253,8 @@ function nuevaTemporada(){
   S.lineupMid={form:S.lineupMid.form,xi:bestXI(u.players,S.lineupMid.form)};
   ensureLineupRoles(S.lineup,u.players);ensureLineupRoles(S.lineupMid,u.players);
   S.offers=[];refreshMarket(); // nueva ventana de mercado
+  (S.freeAgents||[]).forEach(p=>{p.edad++;p.exp=Math.min(400,(p.exp||0)+SEASON_EXP);}); // los libres envejecen
+  S.freeAgents=(S.freeAgents||[]).filter(p=>p.edad<=35); if(S.freeAgents.length<6)seedFreeAgents(6-S.freeAgents.length);
   S.screen="squad";render();
 }
 
@@ -1675,28 +1699,36 @@ function viewMercado(){
     const divOpts=[`<option value="0" ${marketDivF===0?"selected":""}>Todas las div.</option>`];for(let i=1;i<=NDIV;i++)divOpts.push(`<option value="${i}" ${i===marketDivF?"selected":""}>${DIV_NAMES[i]} Div.</option>`);
     const posOpts=["ALL","GK","DF","MF","FW"].map(x=>`<option value="${x}" ${x===marketPosF?"selected":""}>${x==="ALL"?"Todas pos.":x}</option>`).join("");
     let avail=[];Object.values(S.teams).forEach(t=>{if(t.id===S.user)return;if(marketDivF&&t.div!==marketDivF)return;t.players.forEach(p=>{if((p.listSale||p.listLoan)&&(marketPosF==="ALL"||p.pos===marketPosF))avail.push({p,t});});});
-    avail.sort((a,b)=>playerValue(b.p)-playerValue(a.p));
+    (S.freeAgents||[]).forEach(p=>{if(marketPosF==="ALL"||p.pos===marketPosF)avail.push({p,t:null,free:true});});
+    avail.sort((a,b)=>(b.free?1:0)-(a.free?1:0)||playerValue(b.p)-playerValue(a.p)); // los libres primero
     let panel="";
-    if(marketSel){const fo=findOwner(marketSel);if(fo&&fo.owner.id!==S.user){const {owner,p}=fo;
-      panel=`<div class="card" style="padding:14px;margin-bottom:14px;border-color:var(--accent)">
-        <div style="font-weight:700;margin-bottom:6px">${p.name} <span class="pill p-${p.pos}">${p.pos}</span> · ${nivel(p)}/20 · ${p.edad}a · ${crestInline(owner)} ${owner.short}${p.esp?" "+espBadge(p):""}</div>
-        <div class="muted" style="font-size:13px;margin-bottom:8px">Valor: <b>${fmtMoney(playerValue(p))}</b>${p.listSale?` · piden <b>${fmtMoney(p.askPrice)}</b>`:" · no está en venta (harían falta ofertas altísimas)"}${p.listLoan?" · <b>disponible en cesión</b>":""}</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-          <input type="number" id="offerAmt" class="fm" style="max-width:170px" min="0" step="100000" value="${p.listSale?p.askPrice:Math.round(playerValue(p)*1.8)}">
-          <button class="btn primary sm" data-offerdo="${p.id}">Ofertar</button>
-          ${p.listLoan?`<button class="btn ghostgold sm" data-loan="${p.id}">Pedir cesión</button>`:""}
-          <button class="btn ghostgold sm" data-negcancel="1">Cancelar</button>
-        </div></div>`;
-    }}
-    const rows=avail.slice(0,60).map(({p,t})=>`<tr>
+    if(marketSel){
+      const fa=(S.freeAgents||[]).find(p=>p.id===marketSel), fo=fa?null:findOwner(marketSel);
+      if(fa){ const p=fa;
+        panel=`<div class="card" style="padding:14px;margin-bottom:14px;border-color:var(--accent)">
+          <div style="font-weight:700;margin-bottom:6px">${p.name} <span class="pill p-${p.pos}">${p.pos}</span> · ${nivel(p)}/20 · ${p.edad}a · <span class="badge-taker">AGENTE LIBRE</span>${p.esp?" "+espBadge(p):""}</div>
+          <div class="muted" style="font-size:13px;margin-bottom:8px">Fichaje <b>gratis</b> (sin traspaso). Solo asumes su salario: <b>${fmtMoney(salaryOf(p))}/año</b>. Valor de mercado: ${fmtMoney(playerValue(p))}.</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><button class="btn primary sm" data-signfree="${p.id}">Fichar gratis</button><button class="btn ghostgold sm" data-negcancel="1">Cancelar</button></div></div>`;
+      } else if(fo&&fo.owner.id!==S.user){const {owner,p}=fo;
+        panel=`<div class="card" style="padding:14px;margin-bottom:14px;border-color:var(--accent)">
+          <div style="font-weight:700;margin-bottom:6px">${p.name} <span class="pill p-${p.pos}">${p.pos}</span> · ${nivel(p)}/20 · ${p.edad}a · ${crestInline(owner)} ${owner.short}${p.esp?" "+espBadge(p):""}</div>
+          <div class="muted" style="font-size:13px;margin-bottom:8px">Valor: <b>${fmtMoney(playerValue(p))}</b>${p.listSale?` · piden <b>${fmtMoney(p.askPrice)}</b>`:" · no está en venta (harían falta ofertas altísimas)"}${p.listLoan?" · <b>disponible en cesión</b>":""}</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+            <input type="number" id="offerAmt" class="fm" style="max-width:170px" min="0" step="100000" value="${p.listSale?p.askPrice:Math.round(playerValue(p)*1.8)}">
+            <button class="btn primary sm" data-offerdo="${p.id}">Ofertar</button>
+            ${p.listLoan?`<button class="btn ghostgold sm" data-loan="${p.id}">Pedir cesión</button>`:""}
+            <button class="btn ghostgold sm" data-negcancel="1">Cancelar</button>
+          </div></div>`;
+      }}
+    const rows=avail.slice(0,60).map(({p,t,free})=>`<tr>
       <td class="nm" style="font-weight:600">${p.name}${p.esp?" "+espBadge(p):""}</td>
-      <td><div class="teamcell">${crest(t,18)}<span class="nm" style="font-size:12px">${t.short}</span></div></td>
+      <td>${free?'<span class="badge-taker">LIBRE</span>':`<div class="teamcell">${crest(t,18)}<span class="nm" style="font-size:12px">${t.short}</span></div>`}</td>
       <td><span class="pill p-${p.pos}">${p.pos}</span></td>
       <td style="text-align:center">${nivel(p)}</td><td class="num">${p.edad}</td>
       <td class="num">${fmtMoney(playerValue(p))}</td>
-      <td class="num">${p.listSale?fmtMoney(p.askPrice):"—"}</td>
+      <td class="num">${free?"Gratis":p.listSale?fmtMoney(p.askPrice):"—"}</td>
       <td>${p.listLoan?'<span class="badge-prom" style="background:var(--surface-3);color:var(--faint)">CESIÓN</span>':""}</td>
-      <td style="text-align:right"><button class="btn ghostgold sm" data-negot="${p.id}">Negociar</button></td></tr>`).join("")||`<tr><td colspan="9" class="muted" style="padding:14px">No hay jugadores que cumplan el filtro.</td></tr>`;
+      <td style="text-align:right">${free?`<button class="btn ghostgold sm" data-negot="${p.id}">Fichar</button>`:`<button class="btn ghostgold sm" data-negot="${p.id}">Negociar</button>`}</td></tr>`).join("")||`<tr><td colspan="9" class="muted" style="padding:14px">No hay jugadores que cumplan el filtro.</td></tr>`;
     body=`<div class="selrow"><select class="fm" id="mDivSel">${divOpts.join("")}</select><select class="fm" id="mPosSel">${posOpts}</select><span class="pill" style="background:var(--surface-3);color:var(--muted)">${avail.length} disponibles</span></div>
       ${panel}
       <div class="card"><div class="tbl-scroll"><table><thead><tr><th>Jugador</th><th>Club</th><th>Pos</th><th style="text-align:center">Nivel</th><th class="num">Edad</th><th class="num">Valor</th><th class="num">Precio</th><th>Cesión</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
@@ -1735,6 +1767,7 @@ function bindMercado(){
   const oa=document.getElementById("offerAmt");
   document.querySelectorAll("[data-offerdo]").forEach(b=>b.onclick=()=>offerFor(b.dataset.offerdo,oa?+oa.value:0));
   document.querySelectorAll("[data-loan]").forEach(b=>b.onclick=()=>loanRequest(b.dataset.loan));
+  document.querySelectorAll("[data-signfree]").forEach(b=>b.onclick=()=>signFree(b.dataset.signfree));
   document.querySelectorAll("[data-sell]").forEach(b=>b.onclick=()=>{const el=document.getElementById("ask_"+b.dataset.sell);setSale(b.dataset.sell,el?+el.value:0);});
   document.querySelectorAll("[data-loanlist]").forEach(b=>b.onclick=()=>setLoanList(b.dataset.loanlist));
   document.querySelectorAll("[data-unlist]").forEach(b=>b.onclick=()=>unlist(b.dataset.unlist));
@@ -1991,7 +2024,9 @@ function restoreRuntime(){ // tras cargar: recomponer contadores de ids/nombres 
   if(S.ecoV!==ECO_VER){Object.values(S.teams).forEach(initEco);S.ecoV=ECO_VER;} // migrar saves a la economía nueva (caja generosa)
   else Object.values(S.teams).forEach(ensureEco);
   if(!Array.isArray(S.offers))S.offers=[];
+  if(!Array.isArray(S.freeAgents))S.freeAgents=[];
   if(!Object.values(S.teams).some(t=>t.id!==S.user&&t.players.some(p=>p.listSale||p.listLoan)))refreshMarket(); // saves sin mercado: poblarlo
+  if(S.freeAgents.length===0)seedFreeAgents(8);
   lineupTab="liga";tableDiv=null;pendingRelease=null;pendingReleaseY=null;releaseMsg="";
 }
 function exportSave(){
