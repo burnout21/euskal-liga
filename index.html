@@ -136,6 +136,10 @@
   @media(prefers-color-scheme:light){:root:not([data-theme="dark"]) .p-MF{color:#2c5fb8}}
 
   .rating{font-family:var(--font-disp);font-weight:800;font-size:16px;text-align:center;width:34px;height:28px;line-height:28px;border-radius:7px;display:inline-block}
+  .lvl{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:5px;font-family:var(--font-disp);font-weight:800;font-size:15px;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ink) 18%,transparent);vertical-align:middle}
+  .idc{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;font-family:var(--font-disp);font-weight:800;font-size:11px;line-height:1;vertical-align:middle;border:1.5px solid}
+  .idc-c{color:var(--gold-ink);border-color:var(--gold);background:color-mix(in srgb,var(--gold) 24%,transparent)}
+  .idc-p{color:#5b8def;border-color:#5b8def;background:color-mix(in srgb,#5b8def 18%,transparent)}
   .potstars{color:var(--gold-ink);letter-spacing:1px;font-size:12px;white-space:nowrap}
   .potstars .off{color:var(--faint);opacity:.5}
   .badge-prom{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:9px;letter-spacing:.08em;background:color-mix(in srgb,var(--gold) 26%,transparent);color:var(--gold-ink);padding:1px 6px;border-radius:6px;vertical-align:middle}
@@ -559,7 +563,8 @@ const CANT_BONUS=0.08, PROP_BONUS=0.04, PROP_YEARS=3;
 function isCanterano(p){return !!p.homegrown&&!p.parent;}                                   // formado en la cantera del club
 function isPropio(p){return !p.homegrown&&!p.parent&&(S.temporada-(p.arrivedTemp||S.temporada))>=PROP_YEARS;} // 3+ temporadas en el club
 function identMult(p){return p.parent?1:(p.homegrown?1+CANT_BONUS:((S.temporada-(p.arrivedTemp||S.temporada))>=PROP_YEARS?1+PROP_BONUS:1));}
-function identBadge(p){return isCanterano(p)?'<span class="badge-cant" title="Canterano: formado en el club (+'+Math.round(CANT_BONUS*100)+'%)">🌱 CANT</span>':isPropio(p)?'<span class="badge-propio" title="Propio: 3+ temporadas en el club (+'+Math.round(PROP_BONUS*100)+'%)">🏠 PROPIO</span>':'';}
+function identBadge(p){return isCanterano(p)?'<span class="idc idc-c" title="Canterano: formado en el club (+'+Math.round(CANT_BONUS*100)+'%)">C</span>':isPropio(p)?'<span class="idc idc-p" title="Propio: 3+ temporadas en el club (+'+Math.round(PROP_BONUS*100)+'%)">P</span>':'';}
+function lvlBox(p){return `<span class="lvl" style="${skColor(nivel(p))}" title="Nivel en campo (habilidades + experiencia)">${nivel(p)}</span>`;}
 /* ---------- simulación ---------- */
 function xiRating(team,xiIds,form,big){
   const map={};team.players.forEach(p=>map[p.id]=p);
@@ -1389,7 +1394,7 @@ function playerRow(p,own){
     <td><span class="pill p-${p.pos}">${p.pos}</span></td>
     <td class="nm" style="font-weight:600">${p.name}${roles} ${identBadge(p)}${isPromesa(p)?' <span class="badge-prom">PROMESA</span>':''}${p.esp?" "+espBadge(p):""}</td>
     <td class="num">${p.edad}</td>
-    <td style="text-align:center"><span class="rating" style="${skColor(nivel(p))}" title="Nivel en campo (media de habilidades + experiencia)">${nivel(p)}</span></td>
+    <td style="text-align:center">${lvlBox(p)}</td>
     <td class="num" title="Rodaje: ${expPct(p)}% · suma +${expLvlBonus(p).toFixed(1)} al nivel">${expBar(p)}</td>
     ${skillCells(p)}
     <td>${potStars(p.potencial)}</td>
@@ -1420,7 +1425,7 @@ function viewSquad(){
       <span class="pill" style="background:var(--surface-3);color:var(--muted)">Nivel medio ${avg}/20</span>
       <span class="pill" style="background:var(--surface-3);color:var(--muted)">${players.length} jug.</span>
     </div>
-    <p class="sub">Habilidades <b>1-20</b>: POR portería · DEF defensa · JUG jugadas · PAS pases (asistencias) · ANO anotación · TL tiros libres. <b>Nivel</b> = en campo (habilidades + experiencia). <b>Exp</b> = rodaje. ✦ = especialidad${roleLegend}. Las estrellas son el <b>potencial</b>.</p>
+    <p class="sub">Habilidades <b>1-20</b>: POR portería · DEF defensa · JUG jugadas · PAS pases (asistencias) · ANO anotación · TL tiros libres. <b>Nivel</b> = en campo (habilidades + experiencia). <b>Exp</b> = rodaje. ✦ = especialidad · <span class="idc idc-c">C</span> canterano · <span class="idc idc-p">P</span> propio${roleLegend}. Las estrellas son el <b>potencial</b>.</p>
     ${msg}
     <div class="card"><div class="tbl-scroll"><table>
       <thead><tr><th>Pos</th><th>Jugador</th><th class="num">Edad</th><th style="text-align:center">Nivel</th><th class="num" title="Rodaje / experiencia">Exp</th>${skHead}<th>Pot.</th><th class="num">Gol</th>${own?"<th></th>":""}</tr></thead>
@@ -1448,7 +1453,7 @@ function luRow(p,slot){ // slot = puesto del hueco (para marcar fuera de posici�
   return `<div class="lineup-slot" data-swap="${p.id}" style="${st}">
     <span class="slot-lab p-${p.pos}" style="border-radius:6px;padding:2px 0">${p.pos}</span>
     <span style="flex:1;font-weight:600;font-size:14px">${p.name}${capBadge(p,activeLineup())}${takerBadge(p,activeLineup())} ${identBadge(p)}${crk}${prom}${p.esp?" "+espBadge(p):""}${fp} <span class="muted" style="font-weight:400">${p.edad}a</span></span>
-    <span class="slot-meta"><span class="muted" style="font-size:11px" title="Rodaje / experiencia (suma +${expLvlBonus(p).toFixed(1)} al nivel)">${expPct(p)}%</span><span class="rating" style="${skColor(nivel(p))};width:auto;padding:0 7px" title="Nivel en campo">${nivel(p)}</span>${potStars(p.potencial)}</span>
+    <span class="slot-meta"><span class="muted" style="font-size:11px" title="Rodaje / experiencia (suma +${expLvlBonus(p).toFixed(1)} al nivel)">${expPct(p)}%</span>${lvlBox(p)}${potStars(p.potencial)}</span>
   </div>`;
 }
 function viewLineup(){
@@ -1733,17 +1738,18 @@ function viewMercado(){
           </div></div>`;
       }}
     const rows=avail.slice(0,60).map(({p,t,free})=>`<tr>
-      <td class="nm" style="font-weight:600">${p.name}${p.esp?" "+espBadge(p):""}</td>
+      <td class="nm" style="font-weight:600">${p.name}${identBadge(p)?" "+identBadge(p):""}${p.esp?" "+espBadge(p):""}</td>
       <td>${free?'<span class="badge-taker">LIBRE</span>':`<div class="teamcell">${crest(t,18)}<span class="nm" style="font-size:12px">${t.short}</span></div>`}</td>
       <td><span class="pill p-${p.pos}">${p.pos}</span></td>
-      <td style="text-align:center">${nivel(p)}</td><td class="num">${p.edad}</td>
+      <td style="text-align:center">${lvlBox(p)}</td><td class="num">${p.edad}</td>
+      <td style="white-space:nowrap">${potStars(p.potencial)}</td>
       <td class="num">${fmtMoney(playerValue(p))}</td>
       <td class="num">${free?"Gratis":p.listSale?fmtMoney(p.askPrice):"—"}</td>
       <td>${p.listLoan?'<span class="badge-prom" style="background:var(--surface-3);color:var(--faint)">CESIÓN</span>':""}</td>
-      <td style="text-align:right">${free?`<button class="btn ghostgold sm" data-negot="${p.id}">Fichar</button>`:`<button class="btn ghostgold sm" data-negot="${p.id}">Negociar</button>`}</td></tr>`).join("")||`<tr><td colspan="9" class="muted" style="padding:14px">No hay jugadores que cumplan el filtro.</td></tr>`;
+      <td style="text-align:right">${free?`<button class="btn ghostgold sm" data-negot="${p.id}">Fichar</button>`:`<button class="btn ghostgold sm" data-negot="${p.id}">Negociar</button>`}</td></tr>`).join("")||`<tr><td colspan="10" class="muted" style="padding:14px">No hay jugadores que cumplan el filtro.</td></tr>`;
     body=`<div class="selrow"><select class="fm" id="mDivSel">${divOpts.join("")}</select><select class="fm" id="mPosSel">${posOpts}</select><span class="pill" style="background:var(--surface-3);color:var(--muted)">${avail.length} disponibles</span></div>
       ${panel}
-      <div class="card"><div class="tbl-scroll"><table><thead><tr><th>Jugador</th><th>Club</th><th>Pos</th><th style="text-align:center">Nivel</th><th class="num">Edad</th><th class="num">Valor</th><th class="num">Precio</th><th>Cesión</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+      <div class="card"><div class="tbl-scroll"><table><thead><tr><th>Jugador</th><th>Club</th><th>Pos</th><th style="text-align:center">Nivel</th><th class="num">Edad</th><th>Pot.</th><th class="num">Valor</th><th class="num">Precio</th><th>Cesión</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   } else if(marketTab==="mine"){
     const order={GK:0,DF:1,MF:2,FW:3};
     const mine=u.players.slice().sort((a,b)=>order[a.pos]-order[b.pos]||playerValue(b)-playerValue(a));
@@ -1752,12 +1758,12 @@ function viewMercado(){
         :p.listSale?`<span class="badge-taker">EN VENTA ${fmtMoney(p.askPrice)}</span>`:p.listLoan?`<span class="badge-cap">EN CESIÓN</span>`:'<span class="muted">—</span>';
       const acts=p.parent?'<span class="muted" style="font-size:12px">no gestionable</span>':
         `<input type="number" id="ask_${p.id}" class="fm" style="max-width:120px" min="1" step="100000" value="${p.listSale?p.askPrice:playerValue(p)}"><button class="btn ghostgold sm" data-sell="${p.id}">Vender</button><button class="btn ghostgold sm" data-loanlist="${p.id}">Ceder</button>${(p.listSale||p.listLoan)?`<button class="btn ghostgold sm" data-unlist="${p.id}">Quitar</button>`:""}`;
-      return `<tr><td class="nm" style="font-weight:600">${p.name}${p.esp?" "+espBadge(p):""}</td><td><span class="pill p-${p.pos}">${p.pos}</span></td><td style="text-align:center">${nivel(p)}</td><td class="num">${p.edad}</td><td class="num">${fmtMoney(playerValue(p))}</td><td class="num">${fmtMoney(salaryOf(p))}</td><td>${estado}</td><td><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">${acts}</div></td></tr>`;
+      return `<tr><td class="nm" style="font-weight:600">${p.name}${identBadge(p)?" "+identBadge(p):""}${p.esp?" "+espBadge(p):""}</td><td><span class="pill p-${p.pos}">${p.pos}</span></td><td style="text-align:center">${lvlBox(p)}</td><td class="num">${p.edad}</td><td style="white-space:nowrap">${potStars(p.potencial)}</td><td class="num">${fmtMoney(playerValue(p))}</td><td class="num">${fmtMoney(salaryOf(p))}</td><td>${estado}</td><td><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;align-items:center">${acts}</div></td></tr>`;
     }).join("");
     const out=loanedOut();
     const outHtml=out.length?`<div class="sect-title" style="font-size:15px;color:var(--faint);margin:18px 0 6px">Cedidos fuera (${out.length})</div><div class="card" style="padding:10px 14px">${out.map(({p,at})=>`<div style="font-size:13px;padding:3px 0">${p.name} <span class="muted">(${p.pos})</span> → ${at.short} <span class="muted">· vuelve a fin de temporada</span></div>`).join("")}</div>`:"";
     body=`<p class="sub">Pon precio y pulsa <b>Vender</b> para ponerlo en el mercado, o <b>Ceder</b> para ofrecerlo en préstamo. Recibirás ofertas de otros clubes en la pestaña <b>Ofertas</b>; tú decides.</p>
-      <div class="card"><div class="tbl-scroll"><table><thead><tr><th>Jugador</th><th>Pos</th><th style="text-align:center">Nivel</th><th class="num">Edad</th><th class="num">Valor</th><th class="num">Salario</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>${outHtml}`;
+      <div class="card"><div class="tbl-scroll"><table><thead><tr><th>Jugador</th><th>Pos</th><th style="text-align:center">Nivel</th><th class="num">Edad</th><th>Pot.</th><th class="num">Valor</th><th class="num">Salario</th><th>Estado</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>${outHtml}`;
   } else {
     const offers=S.offers||[];
     const rows=offers.map((o,i)=>{const b=S.teams[o.from];return `<div class="card" style="padding:12px 14px;margin-bottom:8px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
