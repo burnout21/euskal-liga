@@ -1,0 +1,333 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Gaztiak · Campeones Vascos</title>
+<style>
+  :root{
+    --bg:#0a0f1e;--surface:#131a30;--surface-2:#1b2340;--line:#2a355c;--ink:#eef2ff;--muted:#98a4c8;--faint:#6b78a0;
+    --accent:#ff4d6d;--accent2:#ffd166;--grass:#2fd47a;--blue:#4aa8ff;--gold:#ffd166;
+    --font-disp:"Arial Narrow","Roboto Condensed",sans-serif;--shadow:0 8px 30px rgba(0,0,0,.4);
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:radial-gradient(1200px 600px at 50% -10%,#16234d,transparent),var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;min-height:100vh}
+  .wrap{max-width:760px;margin:0 auto;padding:16px 16px 48px}
+  h1{font-family:var(--font-disp);font-weight:800;letter-spacing:.04em;text-transform:uppercase;margin:0;font-size:34px;line-height:1}
+  h2{font-family:var(--font-disp);font-weight:800;text-transform:uppercase;letter-spacing:.04em;margin:0 0 10px;font-size:22px}
+  .kick{font-size:12px;letter-spacing:.28em;text-transform:uppercase;color:var(--accent2);font-weight:800}
+  .card{background:linear-gradient(180deg,var(--surface),var(--surface-2));border:1px solid var(--line);border-radius:16px;padding:16px;box-shadow:var(--shadow)}
+  .btn{background:var(--accent);color:#fff;border:none;border-radius:12px;padding:12px 18px;font-weight:800;font-size:16px;cursor:pointer;font-family:var(--font-disp);letter-spacing:.03em;text-transform:uppercase}
+  .btn:hover{filter:brightness(1.08)}
+  .btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+  .btn.gold{background:var(--gold);color:#3a2c00}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .hero{text-align:center;padding:26px 10px}
+  .hero .ball{font-size:60px;line-height:1}
+  .scoreboard{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+  .team-badge{display:flex;flex-direction:column;align-items:center;gap:4px;flex:1;min-width:0}
+  .team-badge .nm{font-family:var(--font-disp);font-weight:800;font-size:15px;text-transform:uppercase;letter-spacing:.03em;text-align:center;line-height:1.05}
+  .score{font-family:var(--font-disp);font-weight:800;font-size:40px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:2px 16px;min-width:120px;text-align:center}
+  .crest{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:24px;box-shadow:inset 0 0 0 2px rgba(255,255,255,.15)}
+  .spirit{margin:2px 0}
+  .spirit .lab{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin-bottom:2px}
+  .track{height:8px;background:#0c122a;border-radius:5px;overflow:hidden;border:1px solid var(--line)}
+  .fill{height:100%;background:linear-gradient(90deg,var(--blue),var(--grass));transition:width .3s}
+  .log{height:220px;overflow-y:auto;background:#0b1122;border:1px solid var(--line);border-radius:12px;padding:12px;margin:12px 0;display:flex;flex-direction:column;gap:7px}
+  .ev{font-size:14px;line-height:1.35;animation:pop .25s ease}
+  .ev.big{font-size:16px;font-weight:700}
+  .ev.goal{color:var(--grass);font-weight:800;font-size:18px}
+  .ev.save{color:var(--blue);font-weight:700}
+  .ev.miss{color:var(--muted)}
+  .ev .who{color:var(--accent2);font-weight:800}
+  @keyframes pop{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .prompt{font-weight:800;color:var(--accent2);text-align:center;margin:6px 0;font-family:var(--font-disp);letter-spacing:.03em;text-transform:uppercase}
+  .tecs{display:flex;flex-direction:column;gap:8px}
+  .tec{width:100%;text-align:left;display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer;color:var(--ink)}
+  .tec:hover:not(:disabled){border-color:var(--accent2)}
+  .tec:disabled{opacity:.42;cursor:not-allowed}
+  .tec .ico{font-size:22px}
+  .tec .body{flex:1;min-width:0}
+  .tec .tn{font-family:var(--font-disp);font-weight:800;font-size:16px;letter-spacing:.02em}
+  .tec .desc{font-size:12px;color:var(--muted)}
+  .tec .cost{font-family:var(--font-disp);font-weight:800;color:var(--blue);font-size:13px;white-space:nowrap}
+  .tec.special .tn{color:var(--accent)}
+  .pl-row{display:flex;align-items:center;gap:10px;padding:8px 4px;border-bottom:1px solid var(--line)}
+  .pill{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:11px;padding:2px 8px;border-radius:8px;background:var(--surface);border:1px solid var(--line)}
+  .p-POR{color:#ffd166}.p-DEF{color:#4aa8ff}.p-MED{color:#2fd47a}.p-DEL{color:#ff7aa0}
+  .tag{font-size:11px;color:var(--accent2);font-weight:700}
+  .muted{color:var(--muted)}.center{text-align:center}
+  .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:12px}
+  .bracket{display:flex;gap:8px;justify-content:center;margin:10px 0}
+  .bstep{flex:1;text-align:center;font-size:12px;padding:8px 4px;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--muted)}
+  .bstep.on{border-color:var(--accent2);color:var(--ink);font-weight:800}
+  .bstep.done{color:var(--grass)}
+</style>
+</head>
+<body>
+<div class="wrap" id="root"></div>
+<script>
+"use strict";
+const rnd=n=>Math.floor(Math.random()*n);
+const pick=a=>a[rnd(a.length)];
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+/* ---------- técnicas especiales (el corazón) ---------- */
+const TECS={
+  // tiros
+  harri:{name:"Tiro Harri",ico:"🪨",type:"shot",pow:34,cost:34,desc:"Disparo con fuerza de roca, imparable de cerca"},
+  tximista:{name:"Tiro Tximista",ico:"⚡",type:"shot",pow:26,cost:22,desc:"Rayo raso e inesperado"},
+  txinbo:{name:"Txinbo Zoro",ico:"🌀",type:"shot",pow:44,cost:46,desc:"Chilena acrobática casi imposible de ver"},
+  itsaso:{name:"Olatu Itsaso",ico:"🌊",type:"shot",pow:38,cost:38,desc:"Efecto ola que baila en el aire"},
+  bikoitza:{name:"Tiro Bikoitza",ico:"🤝",type:"shot",pow:40,cost:36,desc:"Disparo combinado a dúo"},
+  // paradas (portero)
+  esku:{name:"Esku Magikoa",ico:"🧤",type:"save",pow:40,cost:34,desc:"Manos mágicas que atrapan lo imposible"},
+  harresi:{name:"Harresi",ico:"🧱",type:"save",pow:30,cost:22,desc:"Muro infranqueable bajo palos"},
+  hegan:{name:"Hegaldi",ico:"🕊️",type:"save",pow:36,cost:30,desc:"Estirada voladora a la escuadra"},
+};
+const SHOTS=["harri","tximista","txinbo","itsaso","bikoitza"];
+const SAVES=["esku","harresi","hegan"];
+
+/* ---------- nombres vascos ---------- */
+const NOMBRES=["Aitor","Unai","Iker","Julen","Ekaitz","Ander","Koldo","Mikel","Peru","Haritz","Beñat","Xabi","Gorka","Iñaki","Asier","Jon","Markel","Oier","Eneko","Lander"];
+const APELL=["Etxeberria","Agirre","Mendizabal","Zubizarreta","Bilbao","Garmendia","Elizondo","Aranburu","Otxoa","Iraola","Larrañaga","Goikoetxea","Zuloaga","Uribe","Balenziaga"];
+let usados=new Set();
+function nombre(){let n;let g=0;do{n=pick(NOMBRES)+" "+pick(APELL);g++;}while(usados.has(n)&&g<60);usados.add(n);return n;}
+
+let PID=1;
+function mkPlayer(pos,base){
+  const j=g=>clamp(Math.round(base+(Math.random()*2-1)*g),20,99);
+  const p={id:PID++,pos,name:nombre(),
+    tir:pos==="DEL"?j(10)+8:pos==="MED"?j(10):j(12)-6,
+    reg:pos==="DEL"?j(10)+4:pos==="MED"?j(10)+6:j(10)-4,
+    def:pos==="DEF"?j(10)+8:pos==="MED"?j(10):j(12)-8,
+    par:pos==="POR"?j(8)+10:20,
+    spiritMax:100,spirit:100,tecs:[]};
+  return p;
+}
+function mkTeam(name,base,color,ico,starTecs){
+  usados=usados; // conserva nombres únicos por sesión
+  const players=[];
+  players.push(mkPlayer("POR",base));
+  for(let i=0;i<4;i++)players.push(mkPlayer("DEF",base));
+  for(let i=0;i<3;i++)players.push(mkPlayer("MED",base));
+  for(let i=0;i<3;i++)players.push(mkPlayer("DEL",base));
+  // asignar técnicas: el portero una parada, los 3 delanteros un tiro cada uno
+  const gk=players.find(p=>p.pos==="POR");gk.tecs=[starTecs.save||pick(SAVES)];
+  const dels=players.filter(p=>p.pos==="DEL");
+  (starTecs.shots||[]).forEach((t,i)=>{if(dels[i])dels[i].tecs=[t];});
+  dels.forEach(d=>{if(!d.tecs.length)d.tecs=[pick(SHOTS)];});
+  // un mediocampista con un tiro también
+  const med=players.find(p=>p.pos==="MED");if(med)med.tecs=[pick(SHOTS)];
+  return {name,base,color,ico,players,
+    striker:()=>dels.slice().sort((a,b)=>b.tir-a.tir)[0],
+    keeper:()=>gk, dels};
+}
+function resetSpirit(t){t.players.forEach(p=>p.spirit=p.spiritMax);}
+
+/* ---------- estado ---------- */
+let S=null;
+function newGame(){
+  usados=new Set();PID=1;
+  const you=mkTeam("Gaztiak FC",70,"#ff4d6d","🔴",{save:"esku",shots:["harri","tximista","itsaso"]});
+  const rivals=[
+    mkTeam("Muino Beltz",64,"#8b5cf6","🟣",{save:"harresi",shots:["tximista"]}),
+    mkTeam("Sutan Taldea",74,"#ff8c42","🟠",{save:"hegan",shots:["harri","itsaso"]}),
+    mkTeam("Izar Gorria",82,"#4aa8ff","🔵",{save:"esku",shots:["txinbo","harri","itsaso"]}),
+  ];
+  S={you,rivals,round:0,screen:"intro",match:null,unlocked:[]};
+  render();
+}
+
+/* ---------- motor de partido por duelos ---------- */
+const ROUNDS=4; // 4 ataques tuyos + 4 del rival
+function startMatch(){
+  const rival=S.rivals[S.round];
+  resetSpirit(S.you);resetSpirit(rival);
+  S.match={rival,gh:0,ga:0,turn:0,log:[],phase:"you-shoot",over:false};
+  addLog("big","🏟️ ¡Comienza el partido contra <span class='who'>"+rival.name+"</span>! El campo ruge.");
+  S.screen="match";render();
+}
+function addLog(cls,html){S.match.log.push({cls,html});}
+function regenSpirit(t,amt){t.players.forEach(p=>p.spirit=clamp(p.spirit+amt,0,p.spiritMax));}
+
+// duelo tiro vs portero
+function duel(shooter,shotTec,keeper,saveTec){
+  let atk=shooter.tir+(shotTec?TECS[shotTec].pow:0)+rnd(16);
+  let def=keeper.par+(saveTec?TECS[saveTec].pow:0)+rnd(16);
+  return {atk,def,goal:atk>def+2,close:Math.abs(atk-def)<=6};
+}
+
+// ataque del rival (automático), tú eliges si tu portero usa técnica
+function rivalShoot(saveTec){
+  const m=S.match, rival=m.rival, shooter=rival.striker(), keeper=S.you.keeper();
+  // el rival usa su técnica si tiene espíritu
+  let shotTec=null;const st=shooter.tecs[0];
+  if(st&&shooter.spirit>=TECS[st].cost&&Math.random()<0.8){shotTec=st;shooter.spirit-=TECS[st].cost;}
+  if(saveTec){keeper.spirit-=TECS[saveTec].cost;}
+  const r=duel(shooter,shotTec,keeper,saveTec);
+  addLog("big","➡️ <span class='who'>"+shooter.name+"</span> ("+rival.name+") encara el área"+(shotTec?" y prepara su <b>"+TECS[shotTec].name+"</b> "+TECS[shotTec].ico:"")+"…");
+  if(saveTec)addLog("save","🧤 ¡"+keeper.name+" responde con <b>"+TECS[saveTec].name+"</b> "+TECS[saveTec].ico+"!");
+  if(r.goal){m.ga++;addLog("goal","⚽ ¡GOL del "+rival.name+"! "+(r.close?"Por un suspiro.":"Imparable."));}
+  else addLog("save",r.close?"🧤 ¡"+keeper.name+" la saca rozando el palo! Se salva "+S.you.name+".":"🧤 "+keeper.name+" atrapa sin problemas.");
+  afterTurn("you-shoot");
+}
+// tú disparas
+function youShoot(shotTec){
+  const m=S.match, rival=m.rival, shooter=S.you.striker(), keeper=rival.keeper();
+  if(shotTec)shooter.spirit-=TECS[shotTec].cost;
+  // el portero rival usa parada si el disparo es fuerte y tiene espíritu
+  let saveTec=null;const kt=keeper.tecs[0];
+  const strong=shotTec&&TECS[shotTec].pow>=34;
+  if(kt&&keeper.spirit>=TECS[kt].cost&&(strong||Math.random()<0.5)){saveTec=kt;keeper.spirit-=TECS[kt].cost;}
+  const r=duel(shooter,shotTec,keeper,saveTec);
+  addLog("big","🎯 <span class='who'>"+shooter.name+"</span> arma el disparo"+(shotTec?" con su <b>"+TECS[shotTec].name+"</b> "+TECS[shotTec].ico:"")+"…");
+  if(saveTec)addLog("save","🧤 ¡"+keeper.name+" ("+rival.name+") saca su <b>"+TECS[saveTec].name+"</b> "+TECS[saveTec].ico+"!");
+  if(r.goal){m.gh++;addLog("goal","⚽ ¡¡GOOOL de "+S.you.name+"!! "+(shotTec?"¡La "+TECS[shotTec].name+" es INDETENIBLE!":"¡Al fondo de la red!"));}
+  else addLog("miss",saveTec?"🧤 ¡El portero rival lo detiene! Qué paradón.":r.close?"😖 ¡Al palo! Por poco.":"🧤 Atajada del portero rival.");
+  afterTurn("rival-shoot");
+}
+function afterTurn(next){
+  const m=S.match;
+  regenSpirit(S.you,8);regenSpirit(m.rival,8);
+  if(next==="you-shoot")m.turn++;
+  if(m.turn>=ROUNDS && next==="you-shoot"){endMatch();return;}
+  m.phase=next;render();scrollLog();
+}
+function endMatch(){
+  const m=S.match;m.over=true;
+  const win=m.gh>m.ga, draw=m.gh===m.ga;
+  if(draw){ // muerte súbita rápida
+    addLog("big","⏱️ ¡Empate! Se va a un duelo final a un tiro…");
+    const r=duel(S.you.striker(),S.you.striker().tecs[0],m.rival.keeper(),null);
+    if(r.goal){m.gh++;addLog("goal","⚽ ¡"+S.you.name+" gana en la muerte súbita!");}
+    else{m.ga++;addLog("save","🧤 Fallas y el rival aprovecha… derrota agónica.");}
+  }
+  m.result=m.gh>m.ga?"win":"lose";
+  m.phase="end";render();scrollLog();
+}
+function nextAfterMatch(){
+  if(S.match.result==="win"){
+    if(S.round>=S.rivals.length-1){S.screen="champions";render();return;}
+    // recompensa: desbloquear una técnica nueva a un delantero
+    const dels=S.you.dels;const learner=dels[S.round%dels.length];
+    const known=new Set(S.you.players.flatMap(p=>p.tecs));
+    const avail=SHOTS.filter(t=>!known.has(t));
+    const learn=avail.length?pick(avail):pick(SHOTS);
+    learner.tecs.push(learn);S.unlocked.push({who:learner.name,tec:learn});
+    S.round++;S.screen="reward";render();
+  }else{ S.screen="gameover";render(); }
+}
+
+/* ---------- render ---------- */
+function spiritBar(p){return `<div class="spirit"><div class="lab"><span>${p.name}</span><span>${Math.round(p.spirit)}</span></div><div class="track"><div class="fill" style="width:${p.spirit}%"></div></div></div>`;}
+function crest(t){return `<div class="crest" style="background:${t.color}22;color:${t.color}">${t.ico}</div>`;}
+function render(){
+  const r=document.getElementById("root");
+  if(S.screen==="intro")return r.innerHTML=viewIntro();
+  if(S.screen==="team")return r.innerHTML=viewTeam(),bindTeam();
+  if(S.screen==="match")return r.innerHTML=viewMatch(),bindMatch(),scrollLog();
+  if(S.screen==="reward")return r.innerHTML=viewReward(),bind1("goBtn",()=>{S.screen="team";render();});
+  if(S.screen==="gameover")return r.innerHTML=viewEnd(false),bind1("goBtn",()=>newGame());
+  if(S.screen==="champions")return r.innerHTML=viewEnd(true),bind1("goBtn",()=>newGame());
+}
+function bind1(id,fn){const e=document.getElementById(id);if(e)e.onclick=fn;}
+function scrollLog(){const l=document.getElementById("log");if(l)l.scrollTop=l.scrollHeight;}
+
+function viewIntro(){
+  return `<div class="hero">
+    <div class="kick">Fútbol de instituto · estilo anime</div>
+    <div class="ball">⚽🔥</div>
+    <h1>Gaztiak</h1>
+    <div class="muted" style="margin-top:6px">Campeones Vascos</div>
+    <div class="card" style="text-align:left;margin-top:18px">
+      <h2>El torneo</h2>
+      <p class="muted" style="font-size:14px">Eres el <b>Gaztiak FC</b>, un equipo de jóvenes con técnicas especiales. Gana <b>3 duelos</b> ante rivales cada vez más fieros y proclámate campeón.</p>
+      <p style="font-size:14px">En cada disparo <b>tú eliges la técnica</b> (gasta <b>espíritu</b> 💠). Y cuando el rival remata, decides si tu portero saca su <b>parada mágica</b>. ¡Guarda tu supertiro para el momento clave!</p>
+      <div class="bracket">${S.rivals.map((t,i)=>`<div class="bstep ${i===0?'on':''}">${t.ico} ${t.name}</div>`).join("")}</div>
+    </div>
+    <div class="row"><button class="btn gold" onclick="S.screen='team';render()">Ver mi equipo ▶</button></div>
+  </div>`;
+}
+function viewTeam(){
+  const y=S.you;
+  const rows=y.players.map(p=>`<div class="pl-row">
+     <span class="pill p-${p.pos}">${p.pos}</span>
+     <span style="flex:1;font-weight:700">${p.name}</span>
+     <span class="muted" style="font-size:12px">TIR ${p.tir}${p.pos==="POR"?" · PAR "+p.par:""}</span>
+     ${p.tecs.map(t=>`<span class="tag">${TECS[t].ico} ${TECS[t].name}</span>`).join(" ")}
+   </div>`).join("");
+  return `<div class="scoreboard"><div class="team-badge">${crest(y)}<span class="nm">${y.name}</span></div>
+     <div class="muted center" style="flex:2"><div class="kick">Ronda ${S.round+1}/3</div><div style="font-size:15px;margin-top:4px">vs ${S.rivals[S.round].ico} <b>${S.rivals[S.round].name}</b></div></div></div>
+   <div class="card"><h2>Mi plantilla</h2>${rows}
+     <p class="muted" style="font-size:12px;margin-top:8px">✨ Las técnicas se gastan espíritu 💠 y se recargan poco a poco durante el partido.</p></div>
+   <div class="row"><button class="btn" id="playBtn">¡Jugar el partido! ⚽</button></div>`;
+}
+function bindTeam(){bind1("playBtn",startMatch);}
+
+function viewMatch(){
+  const m=S.match,y=S.you,rv=m.rival;
+  const sb=`<div class="scoreboard">
+     <div class="team-badge">${crest(y)}<span class="nm">${y.name}</span></div>
+     <div class="score">${m.gh} - ${m.ga}</div>
+     <div class="team-badge">${crest(rv)}<span class="nm">${rv.name}</span></div>
+   </div>`;
+  const logHtml=`<div class="log" id="log">${m.log.map(e=>`<div class="ev ${e.cls}">${e.html}</div>`).join("")}</div>`;
+  let controls="";
+  if(m.phase==="you-shoot"){
+    const sh=y.striker();
+    controls=`<div class="prompt">⚽ Ataque ${m.turn+1}/${ROUNDS} · dispara ${sh.name}</div>
+      ${spiritBar(sh)}
+      <div class="tecs">
+        <button class="tec" data-shot="">${'<span class="ico">👟</span><div class="body"><div class="tn">Tiro normal</div><div class="desc">Sin coste, disparo raso</div></div><span class="cost">0 💠</span>'}</button>
+        ${sh.tecs.map(t=>tecBtn(t,"shot",sh.spirit)).join("")}
+      </div>`;
+  } else if(m.phase==="rival-shoot"){
+    const gk=y.keeper();
+    controls=`<div class="prompt">🧤 ¡Ataca el rival! ¿Para ${gk.name}?</div>
+      ${spiritBar(gk)}
+      <div class="tecs">
+        <button class="tec" data-save="">${'<span class="ico">🙌</span><div class="body"><div class="tn">Parada normal</div><div class="desc">Sin coste</div></div><span class="cost">0 💠</span>'}</button>
+        ${gk.tecs.map(t=>tecBtn(t,"save",gk.spirit)).join("")}
+      </div>`;
+  } else if(m.phase==="end"){
+    const won=m.result==="win";
+    controls=`<div class="card center" style="border-color:${won?'var(--grass)':'var(--accent)'}">
+        <div class="kick" style="color:${won?'var(--grass)':'var(--accent)'}">${won?'¡Victoria!':'Derrota'}</div>
+        <h1 style="margin:6px 0">${m.gh} - ${m.ga}</h1>
+        <div class="muted">${won?'El Gaztiak avanza en el torneo.':'El sueño termina aquí… ¿otra vez?'}</div>
+        <div class="row"><button class="btn ${won?'gold':''}" id="nextBtn">${won?'Continuar ▶':'Reintentar'}</button></div>
+      </div>`;
+  }
+  return sb+logHtml+controls;
+}
+function tecBtn(t,kind,spirit){const T=TECS[t];const dis=spirit<T.cost?"disabled":"";
+  return `<button class="tec special" data-${kind}="${t}" ${dis}><span class="ico">${T.ico}</span><div class="body"><div class="tn">${T.name}</div><div class="desc">${T.desc}</div></div><span class="cost">${T.cost} 💠</span></button>`;}
+function bindMatch(){
+  document.querySelectorAll("[data-shot]").forEach(b=>b.onclick=()=>youShoot(b.dataset.shot||null));
+  document.querySelectorAll("[data-save]").forEach(b=>b.onclick=()=>rivalShoot(b.dataset.save||null));
+  bind1("nextBtn",nextAfterMatch);
+}
+function viewReward(){
+  const u=S.unlocked[S.unlocked.length-1];
+  return `<div class="hero"><div class="ball">✨🧤</div><h1>¡Nueva técnica!</h1>
+    <div class="card" style="margin-top:16px">
+      <div class="kick">Recompensa de la victoria</div>
+      <h2 style="margin-top:8px">${TECS[u.tec].ico} ${TECS[u.tec].name}</h2>
+      <p class="muted">${TECS[u.tec].desc}</p>
+      <p><b>${u.who}</b> ha aprendido esta técnica. ¡Úsala en el próximo duelo!</p>
+    </div>
+    <div class="row"><button class="btn gold" id="goBtn">Siguiente rival ▶</button></div></div>`;
+}
+function viewEnd(champ){
+  return `<div class="hero"><div class="ball">${champ?'🏆🎉':'💔'}</div>
+    <h1>${champ?'¡CAMPEONES!':'Fin del torneo'}</h1>
+    <div class="card" style="margin-top:16px"><p style="font-size:15px">${champ?'El <b>Gaztiak FC</b> ha conquistado el torneo con sus técnicas especiales. ¡Leyendas del fútbol vasco!':'No ha podido ser esta vez. El fútbol da revanchas…'}</p></div>
+    <div class="row"><button class="btn gold" id="goBtn">Jugar de nuevo</button></div></div>`;
+}
+
+if(typeof module!=="undefined"&&module.exports){module.exports={newGame,startMatch,youShoot,rivalShoot,duel,TECS,getS:()=>S};}
+else{newGame();}
+</script>
+</body>
+</html>
