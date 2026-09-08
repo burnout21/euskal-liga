@@ -140,6 +140,7 @@
   .idc{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;font-family:var(--font-disp);font-weight:800;font-size:11px;line-height:1;vertical-align:middle;border:1.5px solid}
   .idc-c{color:var(--gold-ink);border-color:var(--gold);background:color-mix(in srgb,var(--gold) 24%,transparent)}
   .idc-p{color:#5b8def;border-color:#5b8def;background:color-mix(in srgb,#5b8def 18%,transparent)}
+  .pos2{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:10px;color:var(--grass);vertical-align:middle;margin-left:1px}
   .potstars{color:var(--gold-ink);letter-spacing:1px;font-size:12px;white-space:nowrap}
   .potstars .off{color:var(--faint);opacity:.5}
   .badge-prom{display:inline-block;font-family:var(--font-disp);font-weight:800;font-size:9px;letter-spacing:.08em;background:color-mix(in srgb,var(--gold) 26%,transparent);color:var(--gold-ink);padding:1px 6px;border-radius:6px;vertical-align:middle}
@@ -383,8 +384,15 @@ function clampS(v){return Math.max(1,Math.min(20,v));}
 function sk(p,k,useEff){const L=(useEff?eff(p):p.rating)/5;return clampS(Math.round(L+POSOFF[p.pos][k]+((p.bias&&p.bias[k])||0)));}
 function nivel(p){return clampS(Math.round(eff(p)/5));} // nivel compacto 1-20 (en campo, con experiencia)
 function expandForm(form){const n=FORMACIONES[form]||FORMACIONES["4-4-2"];const a=["GK"];for(let i=0;i<n.DF;i++)a.push("DF");for(let i=0;i<n.MF;i++)a.push("MF");for(let i=0;i<n.FW;i++)a.push("FW");return a;}
-function outPen(nat,slot){ // penalización por jugar fuera de su puesto natural
-  if(nat===slot)return 1;
+function mkPos2(pos){ // polivalencia: lista de puestos extra donde juega sin penalización (o null)
+  if(pos==="GK")return null; // los porteros son especialistas
+  const r=Math.random();
+  if(r<0.045)return ["DF","MF","FW"].filter(x=>x!==pos); // ~4,5% TODOCAMPISTA: juega en las 3 de campo
+  if(r<0.30)return [pick({DF:["MF","MF","FW"],MF:["DF","FW"],FW:["MF","DF"]}[pos])]; // ~26% con un 2º puesto (incluye defensa-delantero DF↔FW)
+  return null;
+}
+function outPen(nat,slot,pos2){ // penalización por jugar fuera de su puesto natural
+  if(nat===slot||(pos2&&pos2.includes(slot)))return 1; // su puesto natural o uno secundario (polivalente): sin penalización
   if(nat==="GK"||slot==="GK")return 0.4;
   const adj={DF:["MF"],MF:["DF","FW"],FW:["MF"]};
   if((adj[nat]||[]).includes(slot))return 0.78;
@@ -467,7 +475,7 @@ function mkPlayer(pos,rating,edad){
   else if(edad<=28)extra=rnd(2);
   else extra=0;
   const potencial=clampR(rating+extra);
-  return {id:pid(),name:newName(),pos,rating,potencial,edad,goles:0,exp:initExp(edad),bias:mkBias(),esp:mkEsp(pos)};
+  return {id:pid(),name:newName(),pos,pos2:mkPos2(pos),rating,potencial,edad,goles:0,exp:initExp(edad),bias:mkBias(),esp:mkEsp(pos)};
 }
 function ageFor(pos){
   // distribución realista: mayoría 22-30
@@ -502,7 +510,7 @@ function genProspect(baseStr,pos,crack){
   if(crack){ rating=clampR(baseStr-12+gauss()*3); potencial=clampR(94+rnd(6)); } // crack de 5 estrellas (techo 94-99)
   else{ rating=clampR(baseStr-16+gauss()*4); potencial=clampR(rating+14+rnd(26)); } // el techo es la apuesta
   const esp=crack?mkEsp(pos,true):mkEsp(pos); // los cracks SIEMPRE traen una especialidad
-  return {id:pid(),name:newName(),pos,rating,potencial,edad,goles:0,crack:!!crack,exp:initExp(edad),arrivedTemp:S?S.temporada:1,bias:mkBias(),esp};
+  return {id:pid(),name:newName(),pos,pos2:mkPos2(pos),rating,potencial,edad,goles:0,crack:!!crack,exp:initExp(edad),arrivedTemp:S?S.temporada:1,bias:mkBias(),esp};
 }
 function regen(pos,baseStr){
   const edad=17+rnd(2);
@@ -565,6 +573,7 @@ function isPropio(p){return !p.homegrown&&!p.parent&&(S.temporada-(p.arrivedTemp
 function identMult(p){return p.parent?1:(p.homegrown?1+CANT_BONUS:((S.temporada-(p.arrivedTemp||S.temporada))>=PROP_YEARS?1+PROP_BONUS:1));}
 function identBadge(p){return isCanterano(p)?'<span class="idc idc-c" title="Canterano: formado en el club (+'+Math.round(CANT_BONUS*100)+'%)">C</span>':isPropio(p)?'<span class="idc idc-p" title="Propio: 3+ temporadas en el club (+'+Math.round(PROP_BONUS*100)+'%)">P</span>':'';}
 function lvlBox(p){return `<span class="lvl" style="${skColor(nivel(p))}" title="Nivel en campo (habilidades + experiencia)">${nivel(p)}</span>`;}
+function pos2Tag(p){if(!p.pos2||!p.pos2.length)return"";const todo=p.pos2.length>=2;return `<span class="pos2" title="${todo?"Todocampista: juega en todo el campo sin penalización":"Polivalente: también juega de "+p.pos2.join("/")+" sin penalización"}">⇄${todo?"TODO":p.pos2.join("/")}</span>`;}
 /* ---------- simulación ---------- */
 function xiRating(team,xiIds,form,big){
   const map={};team.players.forEach(p=>map[p.id]=p);
@@ -574,7 +583,7 @@ function xiRating(team,xiIds,form,big){
   let defSum=0,defN=0,attSum=0,attN=0,allSum=0,hasLider=false;
   xi.forEach((p,i)=>{
     const slot=slots[i]||p.pos;
-    let pen=outPen(p.pos,slot);
+    let pen=outPen(p.pos,slot,p.pos2);
     if(p.esp==="rapido"&&pen<1)pen=Math.min(1,pen+0.15); // se adapta mejor fuera de su puesto
     const val=slotSkill(p,slot,true)*pen*espSectorMult(p,slot,big)*identMult(p)*5; // habilidad del hueco * compatibilidad * especialidad * identidad(canterano/propio) * 5
     allSum+=val;
@@ -1392,7 +1401,7 @@ function playerRow(p,own){
   const roles=own?`${capBadge(p,S.lineup)}${takerBadge(p,S.lineup)}`:"";
   return `<tr>
     <td><span class="pill p-${p.pos}">${p.pos}</span></td>
-    <td class="nm" style="font-weight:600">${p.name}${roles} ${identBadge(p)}${isPromesa(p)?' <span class="badge-prom">PROMESA</span>':''}${p.esp?" "+espBadge(p):""}</td>
+    <td class="nm" style="font-weight:600">${p.name}${roles} ${identBadge(p)}${pos2Tag(p)}${isPromesa(p)?' <span class="badge-prom">PROMESA</span>':''}${p.esp?" "+espBadge(p):""}</td>
     <td class="num">${p.edad}</td>
     <td style="text-align:center">${lvlBox(p)}</td>
     <td class="num" title="Rodaje: ${expPct(p)}% · suma +${expLvlBonus(p).toFixed(1)} al nivel">${expBar(p)}</td>
@@ -1449,10 +1458,12 @@ function luRow(p,slot){ // slot = puesto del hueco (para marcar fuera de posici�
   const sel=swapSel===p.id;
   const st=`cursor:pointer;${sel?"box-shadow:inset 0 0 0 2px var(--accent);":""}`;
   const crk=p.crack?' 💎':'', prom=(!p.crack&&isPromesa(p))?' <span class="badge-prom">PROM</span>':'';
-  const fp=(slot&&slot!==p.pos)?` <span class="badge-prom" style="background:color-mix(in srgb,var(--bad) 20%,transparent);color:var(--bad)" title="Fuera de su posición: rinde peor">⚠ ${slot}</span>`:"";
+  const fp=(slot&&slot!==p.pos)?((p.pos2&&p.pos2.includes(slot))
+      ? ` <span class="badge-prom" style="background:color-mix(in srgb,var(--grass) 22%,transparent);color:var(--grass)" title="Polivalente: juega de ${slot} sin penalización">⇄ ${slot}</span>`
+      : ` <span class="badge-prom" style="background:color-mix(in srgb,var(--bad) 20%,transparent);color:var(--bad)" title="Fuera de su posición: rinde peor">⚠ ${slot}</span>`):"";
   return `<div class="lineup-slot" data-swap="${p.id}" style="${st}">
     <span class="slot-lab p-${p.pos}" style="border-radius:6px;padding:2px 0">${p.pos}</span>
-    <span style="flex:1;font-weight:600;font-size:14px">${p.name}${capBadge(p,activeLineup())}${takerBadge(p,activeLineup())} ${identBadge(p)}${crk}${prom}${p.esp?" "+espBadge(p):""}${fp} <span class="muted" style="font-weight:400">${p.edad}a</span></span>
+    <span style="flex:1;font-weight:600;font-size:14px">${p.name}${capBadge(p,activeLineup())}${takerBadge(p,activeLineup())} ${identBadge(p)}${pos2Tag(p)}${crk}${prom}${p.esp?" "+espBadge(p):""}${fp} <span class="muted" style="font-weight:400">${p.edad}a</span></span>
     <span class="slot-meta"><span class="muted" style="font-size:11px" title="Rodaje / experiencia (suma +${expLvlBonus(p).toFixed(1)} al nivel)">${expPct(p)}%</span>${lvlBox(p)}${potStars(p.potencial)}</span>
   </div>`;
 }
@@ -1480,7 +1491,7 @@ function viewLineup(){
     <span class="muted" style="font-size:12px;flex:1;min-width:200px">${cap?`El capitán tira del equipo <b>+${capPct}%</b> (más en copa y penaltis).`:""} El lanzador resuelve faltas/penaltis con su <b>TL</b> contra la portería rival. Cada once (liga / entre semana) tiene los suyos.</span></div>`;
   return navHtml("lineup")+`
     <h2 class="sect-title">Alineación</h2>
-    <p class="sub">Dos onces: <b>liga</b> y <b>entre semana</b> (copa/amistoso). Toca un jugador y luego otro para <b>intercambiarlos</b> (titular↔suplente o entre suplentes). Puedes poner a cualquiera en cualquier hueco, pero <b>fuera de su puesto rinde peor</b> (aviso ⚠). Solo entrenan los que juegan.</p>
+    <p class="sub">Dos onces: <b>liga</b> y <b>entre semana</b> (copa/amistoso). Toca un jugador y luego otro para <b>intercambiarlos</b> (titular↔suplente o entre suplentes). Puedes poner a cualquiera en cualquier hueco, pero <b>fuera de su puesto rinde peor</b> (aviso ⚠). Los <b>polivalentes</b> (⇄) juegan en su puesto secundario <b>sin penalización</b>. Solo entrenan los que juegan.</p>
     <div class="focusrow" style="margin-bottom:14px">${tab("liga","Once de Liga","fin de semana")}${tab("mid","Once entre semana","copa / amistoso")}</div>
     <div class="selrow">
       <select class="fm" id="formSel">${Object.keys(FORMACIONES).map(f=>`<option ${f===form?"selected":""}>${f}</option>`).join("")}</select>
@@ -2046,6 +2057,8 @@ function restoreRuntime(){ // tras cargar: recomponer contadores de ids/nombres 
   if(!Object.values(S.teams).some(t=>t.id!==S.user&&t.players.some(p=>p.listSale||p.listLoan)))refreshMarket(); // saves sin mercado: poblarlo
   if(S.freeAgents.length===0)seedFreeAgents(8);
   if(S.youthPlan&&S.youthPlan.some(x=>x&&typeof x!=="object"))S.youthPlan=buildYouthPlan(); // migrar plan de cantera antiguo (menos juveniles)
+  const allPl=Object.values(S.teams).flatMap(t=>t.players).concat(S.cantera||[],S.freeAgents||[]);
+  allPl.forEach(p=>{if(!("pos2" in p))p.pos2=mkPos2(p.pos);else if(typeof p.pos2==="string")p.pos2=[p.pos2];}); // saves antiguos: asignar/normalizar polivalencia
   lineupTab="liga";tableDiv=null;pendingRelease=null;pendingReleaseY=null;releaseMsg="";
 }
 function exportSave(){
