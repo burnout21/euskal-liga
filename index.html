@@ -1485,7 +1485,7 @@ function viewLineup(){
     <div class="selrow">
       <select class="fm" id="formSel">${Object.keys(FORMACIONES).map(f=>`<option ${f===form?"selected":""}>${f}</option>`).join("")}</select>
       <button class="btn ghostgold sm" id="autoBtn">Auto (mejor 11)</button>
-      ${lineupTab==="mid"?`<button class="btn ghostgold sm" id="autoNoBtn" title="Alinea a los que NO son titulares en el once de liga">Auto (no titulares)</button>`:""}
+      <button class="btn ghostgold sm" id="autoNoBtn" title="Alinea a los suplentes: el mejor once entre los que NO entran en tu mejor 11">Auto (no titulares)</button>
       <span class="pill" style="background:var(--surface-3);color:var(--muted)">Nivel del 11: ${R(rating/5)}/20</span>
     </div>
     ${msg}${roleBox}
@@ -1510,8 +1510,8 @@ function bindLineup(){
   fs.onchange=()=>{lu.form=fs.value;lu.xi=bestXI(players,fs.value);ensureLineupRoles(lu,players);swapSel=null;swapMsg="";render();};
   document.getElementById("autoBtn").onclick=()=>{lu.xi=bestXI(players,lu.form);ensureLineupRoles(lu,players);swapSel=null;swapMsg="";render();};
   const anb=document.getElementById("autoNoBtn");
-  if(anb)anb.onclick=()=>{ // alinea a los que NO son titulares en el once de liga (rotación)
-    const starters=new Set(S.lineup.xi);
+  if(anb)anb.onclick=()=>{ // alinea a los suplentes: el mejor once entre los que NO entran en el mejor 11
+    const starters=new Set(bestXI(players,lu.form));
     const pool=players.filter(p=>!starters.has(p.id));
     lu.xi=bestXI(pool,lu.form);ensureLineupRoles(lu,players);swapSel=null;swapMsg="";render();
   };
