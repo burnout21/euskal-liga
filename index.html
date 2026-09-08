@@ -523,10 +523,18 @@ function regen(pos,baseStr){
 
 function bestXI(players,form){
   const need=FORMACIONES[form];
-  const byPos=p=>players.filter(x=>x.pos===p).sort((a,b)=>eff(b)-eff(a));
-  const xi=[];xi.push(byPos("GK")[0]);
-  for(const pos of ["DF","MF","FW"]) byPos(pos).slice(0,need[pos]).forEach(p=>xi.push(p));
-  return xi.filter(Boolean).map(p=>p.id);
+  const xi=[],used=new Set();
+  const canPlay=(p,pos)=>p.pos===pos||(p.pos2&&p.pos2.includes(pos));
+  // rellena EXACTAMENTE n huecos de un puesto: primero naturales, luego polivalentes, luego cualquiera libre (para no dejar la alineación coja)
+  const fill=(pos,n)=>{
+    for(const tier of [1,2,3]){
+      if(n<=0)break;
+      const cand=players.filter(p=>!used.has(p.id)&&(tier===1?p.pos===pos:tier===2?canPlay(p,pos):true)).sort((a,b)=>eff(b)-eff(a));
+      for(let i=0;i<cand.length&&n>0;i++){xi.push(cand[i].id);used.add(cand[i].id);n--;}
+    }
+  };
+  fill("GK",1);fill("DF",need.DF);fill("MF",need.MF);fill("FW",need.FW); // mismo orden que expandForm
+  return xi;
 }
 function schedule(ids){
   const t=ids.slice();if(t.length%2)t.push(null);
