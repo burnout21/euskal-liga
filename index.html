@@ -705,15 +705,16 @@ function trainGain(p,role,mult){
   return BASE_TRAIN*am*mult*role*Math.min(1,gap/6+0.35);
 }
 const COMP_MULT={liga:1,copa:2,amistoso:0.5}; // multiplicador de entrenamiento por competición
+const BENCH_ROLE=0.3; // los suplentes también entrenan, al ~30% de un titular
 function trainFromGame(xiSet,compMult){
-  // entrena solo a los que JUEGAN ese partido (los del once), del puesto en foco, escalado por competición
+  // los que JUEGAN entrenan pleno; los suplentes, al 30% (siguen en el equipo y participan en los entrenos)
   const team=S.teams[S.user];
   const focus=S.training.focus, mult=INTENS[S.training.intensidad];
   const general=focus==="ALL", factor=general?GENERAL_FACTOR:1;
   team.players.forEach(p=>{
-    if(!xiSet.has(p.id))return;
     if(!(general||p.pos===focus))return;
-    p.rating=clampR(p.rating+trainGain(p,1,mult*factor*compMult));
+    const role=xiSet.has(p.id)?1:BENCH_ROLE;
+    p.rating=clampR(p.rating+trainGain(p,role,mult*factor*compMult));
   });
 }
 function weeklyDecline(){
