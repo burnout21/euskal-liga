@@ -987,6 +987,8 @@ function simMidweek(w){
     if(wasFinal)out.justChamp={comp:"Supercopa",id:S.superChamp};
   }
   out.amisRows=allFriendlies(Object.keys(S.teams).filter(id=>!busy.has(id)));
+  const neutral=(d.type==="super")||(d.type==="copa"&&d.single); // Supercopa y final de Copa: campo neutral; el resto, campo del más pequeño
+  out.cupRows.forEach(r=>cupGateSplit(r.homeId,r.awayId,neutral)); // recaudación de copa a medias
   if(out.cupRows.some(r=>r.homeId===S.user||r.awayId===S.user))out.userComp="copa"; // cualquier copa entrena x2
   return out;
 }
@@ -1011,12 +1013,38 @@ function debtLimit(team){return -Math.round(incomeBaseSeason(team)*0.75);}   // 
 function loanLimit(team){return Math.round(incomeBaseSeason(team)*LOAN_FACTOR);}
 function loanHeadroom(team){return Math.max(0,loanLimit(team)-(team.loan||0));}
 function interestWeekly(team){return Math.round((team.loan||0)*ANNUAL_INTEREST/NWEEKS);}
-function tvWeekly(team){return Math.round(incomeBaseSeason(team)*0.30/NWEEKS);}
-function gateHome(team){return Math.round(incomeBaseSeason(team)*0.55/14);}   // taquilla por partido de liga en casa (14 al año)
+function tvWeekly(team){return Math.round(incomeBaseSeason(team)*0.30/NWEEKS);} // patrocinio + TV por temporada según división (goteo semanal)
+/* ---------- estadio y asistencia (automático) ---------- */
+function estadioMaxOf(team){const tn=clampS(Math.round(team.str/5));return Math.round(Math.pow(tn,3)*8);} // aforo tope según el tamaño del club
+function ensureStadium(team){
+  if(typeof team.estadio==="number")return;
+  team.estadioMax=estadioMaxOf(team);
+  team.estadio=Math.round(team.estadioMax*0.55);                                  // arranca a ~55% del tope
+  team.ticket=Math.max(5,Math.round(incomeBaseSeason(team)*0.55/(14*team.estadio*0.62))); // precio calibrado: al inicio la taquilla ≈ 55% del ingreso base
+}
+function teamForm(team){const h=(team.hist||[]).slice(-5);if(!h.length)return 0.5;return h.reduce((s,r)=>s+(r==="W"?1:r==="D"?0.5:0),0)/h.length;}
+function fillRate(team){const wr=team.pj?(team.pts/(team.pj*3)):0.4;return Math.max(0.3,Math.min(1,0.42+wr*0.35+teamForm(team)*0.18));} // asistencia según resultados+forma
+function attendance(team){ensureStadium(team);return Math.round(team.estadio*fillRate(team));}
+function matchGate(team){return Math.round(attendance(team)*team.ticket);}       // taquilla de un partido en casa
+function growStadiums(){ // el aforo crece cada temporada según la posición final y la división, hasta el tope
+  for(let div=1;div<=NDIV;div++){
+    const st=standings(div),n=st.length;
+    st.forEach((t,i)=>{ensureStadium(t);if(t.estadio>=t.estadioMax)return;
+      const posF=n>1?1-i/(n-1):1, divF=(9-div)/8+0.3;
+      t.estadio=Math.min(t.estadioMax,t.estadio+Math.max(0,Math.round(t.estadioMax*0.09*(0.25+0.75*posF)*divF)));});
+  }
+}
+function cupGateSplit(homeId,awayId,neutral){ // recaudación de copa a medias entre los dos clubes
+  const H=S.teams[homeId],A=S.teams[awayId];ensureStadium(H);ensureStadium(A);ensureEco(H);ensureEco(A);
+  const host=neutral?(H.estadio>=A.estadio?H:A):H; // KO: campo del más pequeño (r.homeId). Final/Supercopa: campo neutral (el mayor)
+  const gate=Math.round(host.estadio*Math.min(1,fillRate(host)+0.15)*host.ticket); // la copa llena algo más
+  const half=Math.round(gate/2);
+  [H,A].forEach(t=>{t.caja=(t.caja||0)+half;t.ecoIn=(t.ecoIn||0)+half;});
+}
 function fmtMoney(n){const a=Math.abs(Math.round(n));const s=n<0?"−":"";if(a>=1e6)return s+(a/1e6).toFixed(a>=1e7?0:1).replace(".",",")+" M€";if(a>=1e3)return s+Math.round(a/1e3)+" k€";return s+a+" €";}
 function canSell(team,p){if(p.parent)return false;const posN=team.players.filter(x=>x.pos===p.pos).length;return team.players.length>SQUAD_MIN&&posN>MIN_POS[p.pos];} // no se puede vender/ceder a un jugador que está cedido de otro club
-function initEco(team){team.caja=Math.round(incomeBaseSeason(team)*1.0);team.redWeeks=0;team.ecoIn=0;team.ecoOut=0;team.loan=0;} // arranque holgado: una temporada de ingresos en caja
-function ensureEco(team){if(typeof team.caja!=="number")initEco(team);if(typeof team.redWeeks!=="number")team.redWeeks=0;if(typeof team.ecoIn!=="number")team.ecoIn=0;if(typeof team.ecoOut!=="number")team.ecoOut=0;if(typeof team.loan!=="number")team.loan=0;}
+function initEco(team){team.caja=Math.round(incomeBaseSeason(team)*1.0);team.redWeeks=0;team.ecoIn=0;team.ecoOut=0;team.loan=0;ensureStadium(team);} // arranque holgado: una temporada de ingresos en caja
+function ensureEco(team){if(typeof team.caja!=="number")initEco(team);if(typeof team.redWeeks!=="number")team.redWeeks=0;if(typeof team.ecoIn!=="number")team.ecoIn=0;if(typeof team.ecoOut!=="number")team.ecoOut=0;if(typeof team.loan!=="number")team.loan=0;ensureStadium(team);}
 function borrow(amount){const t=S.teams[S.user];ensureEco(t);amount=Math.max(0,Math.min(Math.round(amount||0),loanHeadroom(t)));if(amount<=0)return;t.caja+=amount;t.loan+=amount;saveGame();render();}
 function repay(amount){const t=S.teams[S.user];ensureEco(t);amount=Math.max(0,Math.min(Math.round(amount||0),Math.min(t.caja,t.loan||0)));if(amount<=0)return;t.caja-=amount;t.loan-=amount;saveGame();render();}
 // procesa la semana económica de todos los clubes; devuelve el informe del equipo del usuario
@@ -1024,7 +1052,7 @@ function economyTick(homeSet){
   let userReport=null;
   Object.values(S.teams).forEach(team=>{
     ensureEco(team);
-    const income=tvWeekly(team)+(homeSet.has(team.id)?gateHome(team):0);
+    const income=tvWeekly(team)+(homeSet.has(team.id)?matchGate(team):0); // patrocinio + taquilla (aforo × asistencia) si juega en casa
     const expense=weeklyWages(team);
     team.caja+=income-expense; team.ecoIn+=income; team.ecoOut+=expense;
     const interest=interestWeekly(team); if(interest){team.caja-=interest;team.ecoOut+=interest;} // intereses del préstamo
@@ -1275,6 +1303,7 @@ function nuevaTemporada(){
   champ1.palmares.liga1++; champ2.palmares.liga2++;
   S.winners.push({temp:S.temporada,liga1:champ1.id,liga2:champ2.id,copa:S.copaChamp,copaliga:S.copaLigaChamp,super:S.superChamp});
   seasonPrizes(); // premios de fin de temporada según la clasificación final
+  growStadiums(); // el aforo crece según la clasificación final y la división
   returnLoans();  // los cedidos vuelven a su club
   promoteRelegate();
   // envejecer y desarrollar
@@ -1824,7 +1853,9 @@ function bindMercado(){
 function viewEconomia(){
   const t=S.teams[S.user];ensureEco(t);
   const wages=seasonWages(t), wagesW=weeklyWages(t);
-  const inc=incomeBaseSeason(t), tvS=Math.round(inc*0.30), gateS=Math.round(inc*0.55), prizeEst=Math.round(inc*0.15*0.6);
+  const inc=incomeBaseSeason(t), tvS=Math.round(inc*0.30), prizeEst=Math.round(inc*0.15*0.6);
+  const gateNow=matchGate(t), att=attendance(t), fillPct=Math.round(fillRate(t)*100), gateS=gateNow*14;
+  const fmtNum=n=>Math.round(n).toLocaleString("es-ES");
   const squadVal=t.players.reduce((s,p)=>s+playerValue(p),0);
   const inRed=t.caja<0, dl=debtLimit(t);
   const balSeason=(t.ecoIn||0)-(t.ecoOut||0);
@@ -1839,7 +1870,7 @@ function viewEconomia(){
       <h2 class="sect-title" style="margin:0">💰 Economía · ${t.short} · T${S.temporada}</h2>
       <span class="pill" style="background:var(--surface-3);${inRed?"color:var(--bad)":"color:var(--muted)"}">Caja ${fmtMoney(t.caja)}</span>
     </div>
-    <p class="sub">Cobras cada semana (TV/patrocinio + taquilla en casa) y pagas los salarios. Los premios llegan al final de temporada. Vigila no quedarte en rojo demasiado tiempo.</p>
+    <p class="sub">Ingresos automáticos: <b>patrocinio</b> (según división) + <b>taquilla</b> (aforo × asistencia, que sube con los buenos resultados) + <b>premios</b> por posición. La <b>copa</b> reparte la recaudación a medias. Vigila no quedarte en rojo demasiado tiempo.</p>
     ${warn}
     <div style="display:flex;flex-wrap:wrap;gap:16px">
       ${card("Caja y estado",
@@ -1848,10 +1879,15 @@ function viewEconomia(){
         stat("Semanas en rojo",inRed?`${t.redWeeks}/${ECO_GRACE}`:"—")+
         stat("Valor de la plantilla",fmtMoney(squadVal)))}
       ${card("Ingresos (estimado temporada)",
-        stat("TV / patrocinio",fmtMoney(tvS))+
+        stat("Patrocinio y TV",fmtMoney(tvS))+
         stat("Taquilla (14 partidos)",fmtMoney(gateS))+
         stat("Premios por posición",fmtMoney(prizeEst)+" aprox.")+
         stat("Acumulado esta temporada",fmtMoney(t.ecoIn||0),"color:var(--grass)"))}
+      ${card("🏟️ Estadio",
+        stat("Aforo actual",fmtNum(t.estadio))+
+        stat("Aforo máximo",fmtNum(t.estadioMax))+
+        stat("Asistencia media",fmtNum(att)+" ("+fillPct+"%)")+
+        stat("Taquilla por partido",fmtMoney(gateNow)))}
       ${card("Gastos",
         stat("Masa salarial (año)",fmtMoney(wages))+
         stat("Salarios (semana)",fmtMoney(wagesW))+
